@@ -1,0 +1,5 @@
+# Configure line endings
+* text=auto eol=lf
+
+# Markdown files should use LF line endings
+*.md text eol=lf

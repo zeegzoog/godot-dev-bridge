@@ -1,0 +1,83 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  addon:
+    name: Package Godot addon
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Package addon archive
+        run: zip -r godot-dev-bridge-addon.zip addons/godot_dev_bridge
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: godot-dev-bridge-addon.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bin: godot-dev-bridge.exe
+            archive_ext: zip
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            bin: godot-dev-bridge
+            archive_ext: tar.gz
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            bin: godot-dev-bridge
+            archive_ext: tar.gz
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            bin: godot-dev-bridge
+            archive_ext: tar.gz
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Package archive (Unix)
+        if: matrix.archive_ext == 'tar.gz'
+        shell: bash
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar -czf "${{ github.workspace }}/godot-dev-bridge-${{ matrix.target }}.tar.gz" ${{ matrix.bin }}
+
+      - name: Package archive (Windows)
+        if: matrix.archive_ext == 'zip'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "target/${{ matrix.target }}/release/${{ matrix.bin }}" -DestinationPath "godot-dev-bridge-${{ matrix.target }}.zip"
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: godot-dev-bridge-${{ matrix.target }}.*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
