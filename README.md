@@ -1,1 +1,1 @@
-# godot-dev-bridge
+# Godot Development Bridge
