@@ -86,3 +86,78 @@ impl Drop for FakeGame {
         }
     }
 }
+
+use std::process::Stdio;
+use std::sync::Mutex;
+use std::time::Instant;
+
+/// The Godot executable for tests: `GODOT_CONSOLE_PATH` on Windows (it prints to a pipe),
+/// otherwise `GODOT_PATH`; a `.env` file fills in what the shell did not export.
+pub fn godot_path() -> PathBuf {
+    let _ = dotenvy::dotenv();
+    let var = |name: &str| {
+        std::env::var(name)
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+    };
+    let chosen = if cfg!(windows) {
+        var("GODOT_CONSOLE_PATH").or_else(|| var("GODOT_PATH"))
+    } else {
+        var("GODOT_PATH")
+    };
+    PathBuf::from(
+        chosen.expect("set GODOT_PATH (and GODOT_CONSOLE_PATH on Windows) to run the Godot tests"),
+    )
+}
+
+pub fn project_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+}
+
+/// Runs Godot in the repository root with a deadline; returns (success, stdout + stderr).
+pub fn run_godot(godot: &Path, args: &[&str], timeout: Duration) -> (bool, String) {
+    let scratch = tempfile::tempdir().expect("temp dir");
+    let log_path = scratch.path().join("godot.log");
+    let log = std::fs::File::create(&log_path).expect("log file");
+    let errors = log.try_clone().expect("clone log");
+    let mut child = std::process::Command::new(godot)
+        .args(args)
+        .current_dir(project_root())
+        .stdin(Stdio::null())
+        .stdout(log)
+        .stderr(errors)
+        .spawn()
+        .expect("Godot starts");
+    let read_log =
+        || String::from_utf8_lossy(&std::fs::read(&log_path).unwrap_or_default()).into_owned();
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Some(status) = child.try_wait().expect("poll Godot") {
+            return (status.success(), read_log());
+        }
+        if Instant::now() > deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return (
+                false,
+                format!("timed out after {timeout:?}\n{}", read_log()),
+            );
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// Imports the dev project once per test binary (a fresh `.godot/` cache is needed first).
+pub fn ensure_imported(godot: &Path) {
+    static IMPORTED: Mutex<bool> = Mutex::new(false);
+    let mut done = IMPORTED.lock().unwrap_or_else(|error| error.into_inner());
+    if !*done {
+        let (ok, log) = run_godot(
+            godot,
+            &["--headless", "--path", ".", "--import"],
+            Duration::from_secs(180),
+        );
+        assert!(ok, "importing the dev project failed:\n{log}");
+        *done = true;
+    }
+}

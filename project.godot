@@ -1,0 +1,10 @@
+; Minimal Godot project for developing and validating the addons/godot_dev_bridge addon
+; in isolation. Not a game: it gives `--path .` a real project context so the addon's
+; scripts resolve during headless checks, and it hosts the test fixtures.
+
+config_version=5
+
+[application]
+
+config/name="Godot Dev Bridge (addon dev project)"
+config/features=PackedStringArray("4.5")
