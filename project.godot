@@ -8,3 +8,8 @@ config_version=5
 
 config/name="Godot Dev Bridge (addon dev project)"
 config/features=PackedStringArray("4.5")
+
+
+[autoload]
+
+DevBridge="*res://addons/godot_dev_bridge/dev_bridge.gd"
