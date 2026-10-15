@@ -42,6 +42,10 @@ func _initialize() -> void:
 
     check.equal(registry.run_command("echo", {"a": 1}), {"value": {"a": 1}}, "a command's value is wrapped")
     check.equal(registry.run_command("echo", {"__bad_args__": "`a` is missing."}), {"bad_args": "`a` is missing."}, "a dictionary whose only key is __bad_args__ refuses the arguments")
+    var refusal: Dictionary = registry.refuse("`a` is missing.")
+    check.equal(refusal.size(), 1, "a refusal is one entry")
+    check.equal(registry.run_command("echo", refusal), {"bad_args": "`a` is missing."}, "and what refuse returns refuses the arguments")
+    check.equal(registry.refuse(7), {"__bad_args__": "7"}, "a message that is not text is turned into text, not into a script error")
     check.equal(registry.run_command("echo", {"__bad_args__": 7}), {"bad_args": "7"}, "with its value as the message")
     check.equal(registry.run_command("echo", {"__bad_args__": "x", "b": 2}), {"value": {"__bad_args__": "x", "b": 2}}, "a dictionary with other keys is a value")
     check.equal(registry.run_command("echo", {"error": "x"}), {"value": {"error": "x"}}, "and so is one with an error entry")

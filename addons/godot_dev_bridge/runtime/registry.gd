@@ -4,9 +4,11 @@ extends RefCounted
 ## registered by name by the project's adapter. The core knows nothing of the game; this is the one
 ## place the game's own names enter. A project command may not take the name of a core command.
 
-## A project command refuses its arguments by returning a dictionary whose only key is this one,
-## with the message as its value; the driver gets a `bad_args` error. A key of the adapter contract
-## that no command result is likely to have: what an `error` entry means is the project's own.
+## A project command refuses its arguments by returning `refuse(message)`, a dictionary whose only
+## key is this one with the message as its value; the driver gets a `bad_args` error. A key of the
+## adapter contract that no command result is likely to have: what an `error` entry means is the
+## project's own. A command calls `refuse` rather than writing the key, so a typo in the key cannot
+## turn a refusal into an ordinary result.
 const BAD_ARGS_KEY := "__bad_args__"
 
 ## Names the core owns; set by the session.
@@ -28,12 +30,20 @@ func add_state(name: String, provider: Callable) -> bool:
     return true
 
 
+## What a project command returns to refuse the arguments it was given: the driver gets a `bad_args`
+## error (exit status 1) carrying `message`. The adapter keeps the registry it was handed in
+## `register(registry)` to call this. A dictionary, so a handler declared `-> Dictionary` returns it
+## as it is. Any value is accepted and shown as text: a script error inside the adapter would reach
+## the driver as an `internal` error without the message.
+func refuse(message: Variant) -> Dictionary:
+    return {BAD_ARGS_KEY: str(message)}
+
 ## Registers a project command: `handler` takes the arguments dictionary and returns any value.
 ## Refused (logged, not raised) when the name is empty or taken by the core, or the handler is
 ## invalid or does not take exactly one argument. A handler that fails inside its own script cannot
 ## be told from one that returns nothing (the engine logs the script error and the call yields
-## `null`), so a command that can fail should say so in what it returns: `{BAD_ARGS_KEY: message}`
-## to refuse its arguments, or a value that describes the failure.
+## `null`), so a command that can fail should say so in what it returns: `refuse(message)` to refuse
+## its arguments, or a value that describes the failure.
 func add_command(name: String, handler: Callable, help: String = "") -> bool:
     if name.is_empty() or reserved.has(name):
         push_warning("godot_dev_bridge: refused project command '%s' (empty or core name)" % name)

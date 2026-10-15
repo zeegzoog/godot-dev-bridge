@@ -99,7 +99,10 @@ Without an adapter the bridge is the generic core. To show and do things specifi
 ```gdscript
 extends RefCounted
 
+var _registry: Variant = null
+
 func register(registry) -> void:
+    _registry = registry
     registry.add_state("player", _player)
     registry.add_command("heal", _heal, "Restores health: {amount?}.")
 
@@ -110,11 +113,11 @@ func _player() -> Dictionary:
 func _heal(args: Dictionary) -> Dictionary:
     var amount: Variant = args.get("amount", 1)
     if not (amount is int or amount is float):
-        return {"__bad_args__": "amount must be a number"}
+        return _registry.refuse("amount must be a number")
     return {"healed": int(amount)}
 ```
 
-Then pick the script in **Project Settings → Godot Dev Bridge → Adapter** (the setting `godot_dev_bridge/adapter`). A state provider takes no arguments and returns a value; a command takes exactly one argument, the JSON arguments as a dictionary, and returns a value (a handler with another signature is refused with a warning in the game's log). A command reports its own failures in what it returns, because a script error inside a command cannot be told from a command that returns nothing: it answers `null` (or the default of the declared return type, such as `{}` for `-> Dictionary`), and the engine only logs the error. To refuse its arguments, a command returns a dictionary whose only key is `__bad_args__`, with the message as its value: the answer is then a `bad_args` error (exit status 1). Every other value is the command's result (`ok` is true), a dictionary with an `error` entry included. Values are converted to JSON like the result of `eval`. A provider should answer an empty value, not an error, while what it reads does not exist (a menu has no player). The names of the core commands are reserved. Read it back with `godot-dev-bridge state player` and `godot-dev-bridge do heal '{"amount": 3}'`.
+Then pick the script in **Project Settings → Godot Dev Bridge → Adapter** (the setting `godot_dev_bridge/adapter`). A state provider takes no arguments and returns a value; a command takes exactly one argument, the JSON arguments as a dictionary, and returns a value (a handler with another signature is refused with a warning in the game's log). A command reports its own failures in what it returns, because a script error inside a command cannot be told from a command that returns nothing: it answers `null` (or the default of the declared return type, such as `{}` for `-> Dictionary`), and the engine only logs the error. To refuse its arguments, a command returns `registry.refuse("message")` (keep the registry that `register` was handed, as above): the answer is then a `bad_args` error (exit status 1). `refuse` returns a dictionary, so a handler declared `-> Dictionary` returns it as it is. Its one key, `__bad_args__`, is an implementation detail: always go through `refuse`, because a misspelled key is an ordinary result (`ok` is true). Every other value is the command's result (`ok` is true), a dictionary with an `error` entry included. Values are converted to JSON like the result of `eval`. A provider should answer an empty value, not an error, while what it reads does not exist (a menu has no player). The names of the core commands are reserved. Read it back with `godot-dev-bridge state player` and `godot-dev-bridge do heal '{"amount": 3}'`.
 
 Extend `RefCounted`. Whether the adapter was found and registered is in `ready.json` and in `godot-dev-bridge status` (`adapter`: `configured`, `path`, `loaded`, and `error` when it did not load), so a missing or broken adapter shows up without reading `game.log`. A script error halfway through `register` cannot be caught: what was registered before it stays, and the error is in the log.
 

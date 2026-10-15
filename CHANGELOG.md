@@ -4,6 +4,14 @@ All notable changes to godot-dev-bridge. The client and the Godot addon always s
 version number. The section for a version is used as the text of its GitHub Release, so every
 release needs one (the release workflow fails without it).
 
+## [Unreleased]
+
+### Added
+
+- `registry.refuse(message)`: what a project command returns to refuse its arguments. It returns
+  the dictionary whose only key is `__bad_args__`, so commands that write that dictionary by hand
+  keep working; calling `refuse` means a misspelled key cannot turn a refusal into an ordinary result.
+
 ## [0.2.0] - 2026-10-15
 
 ### Added
