@@ -1,0 +1,196 @@
+mod common;
+
+use common::{FakeGame, fail, ok};
+use godot_dev_bridge::config::Context;
+use godot_dev_bridge::run;
+use godot_dev_bridge::session::{SessionRecord, session_directory, write_record};
+use serde_json::{Value, json};
+use std::path::{Path, PathBuf};
+
+fn context(dir: &Path) -> Context {
+    Context {
+        root: dir.join("sessions"),
+        cwd: dir.to_path_buf(),
+        ..Context::default()
+    }
+}
+
+fn session(ctx: &Context, name: &str, pid: u32) -> PathBuf {
+    let directory = session_directory(&ctx.root, name);
+    std::fs::create_dir_all(&directory).unwrap();
+    write_record(
+        &directory,
+        &SessionRecord {
+            pid,
+            command: vec![],
+            started: 0.0,
+        },
+    )
+    .unwrap();
+    directory
+}
+
+fn drive(ctx: &Context, args: &[&str]) -> (i32, Value) {
+    let mut argv = vec!["godot-dev-bridge".to_string()];
+    argv.extend(args.iter().map(|word| word.to_string()));
+    let (status, output) = run(argv, ctx);
+    (status, output.expect("an output object"))
+}
+
+#[test]
+fn a_command_gets_the_games_answer_and_exit_status_zero() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = context(dir.path());
+    let directory = session(&ctx, "default", std::process::id());
+    let _game = FakeGame::start(
+        &directory,
+        Box::new(|command, args| ok(json!({"command": command, "args": args}))),
+    );
+    let (status, answer) = drive(&ctx, &["step", "5"]);
+    assert_eq!(status, 0);
+    assert_eq!(answer["ok"], true);
+    assert_eq!(answer["result"]["command"], "step");
+    assert_eq!(answer["result"]["args"], json!({"ticks": 5}));
+}
+
+#[test]
+fn an_error_answer_from_the_game_is_exit_status_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = context(dir.path());
+    let directory = session(&ctx, "default", std::process::id());
+    let _game = FakeGame::start(&directory, Box::new(|_, _| fail("not_found", "No node")));
+    let (status, answer) = drive(&ctx, &["get", "/root/Nope"]);
+    assert_eq!(status, 1);
+    assert_eq!(answer["error"]["code"], "not_found");
+}
+
+#[test]
+fn a_missing_session_is_exit_status_two_with_a_client_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let (status, answer) = drive(&context(dir.path()), &["ping"]);
+    assert_eq!(status, 2);
+    assert_eq!(answer["ok"], false);
+    assert_eq!(answer["error"]["code"], "client");
+    assert!(
+        answer["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("no session named 'default'")
+    );
+}
+
+#[test]
+fn a_dead_game_is_exit_status_two() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = context(dir.path());
+    session(&ctx, "default", u32::MAX - 1);
+    let (status, answer) = drive(&ctx, &["ping"]);
+    assert_eq!(status, 2);
+    assert!(
+        answer["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("is not running")
+    );
+}
+
+#[test]
+fn no_answer_in_time_is_exit_status_two() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = context(dir.path());
+    session(&ctx, "default", std::process::id());
+    let (status, answer) = drive(&ctx, &["--timeout", "0.3", "ping"]);
+    assert_eq!(status, 2);
+    assert!(
+        answer["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("no answer to 'ping'")
+    );
+}
+
+#[test]
+fn the_session_comes_from_the_flag_then_the_environment() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ctx = context(dir.path());
+    ctx.session_env = Some("from-env".into());
+    let directory = session(&ctx, "from-env", std::process::id());
+    let _game = FakeGame::start(&directory, Box::new(|_, _| ok(json!({"pong": true}))));
+    assert_eq!(drive(&ctx, &["ping"]).0, 0);
+    assert_eq!(drive(&ctx, &["--session", "other", "ping"]).0, 2);
+}
+
+#[test]
+fn sessions_lists_what_is_there() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = context(dir.path());
+    session(&ctx, "alpha", std::process::id());
+    let (status, answer) = drive(&ctx, &["sessions"]);
+    assert_eq!(status, 0);
+    assert_eq!(answer["sessions"][0]["session"], "alpha");
+    assert_eq!(answer["sessions"][0]["alive"], true);
+}
+
+#[test]
+fn a_non_positive_timeout_is_a_usage_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let (status, answer) = drive(&context(dir.path()), &["--timeout", "0", "ping"]);
+    assert_eq!(status, 2);
+    assert!(
+        answer["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("positive")
+    );
+}
+
+#[test]
+fn unknown_verbs_are_status_two_and_clap_prints_the_usage() {
+    let dir = tempfile::tempdir().unwrap();
+    let (status, output) = run(
+        vec!["godot-dev-bridge".into(), "nonsense".into()],
+        &context(dir.path()),
+    );
+    assert_eq!((status, output), (2, None));
+}
+
+#[test]
+fn start_without_a_godot_executable_names_the_places_it_looked() {
+    let dir = tempfile::tempdir().unwrap();
+    let (status, answer) = drive(&context(dir.path()), &["start", "--headless"]);
+    assert_eq!(status, 2);
+    assert!(
+        answer["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("no Godot executable")
+    );
+}
+
+#[test]
+fn start_refuses_to_run_over_a_live_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = context(dir.path());
+    session(&ctx, "default", std::process::id());
+    let (status, answer) = drive(&ctx, &["start"]);
+    assert_eq!(status, 2);
+    assert!(
+        answer["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("already running")
+    );
+}
+
+#[test]
+fn stop_of_an_unknown_session_is_a_client_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let (status, answer) = drive(&context(dir.path()), &["stop"]);
+    assert_eq!(status, 2);
+    assert!(
+        answer["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("no session named")
+    );
+}
