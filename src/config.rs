@@ -1,0 +1,179 @@
+//! Everything the client learns from its environment: the spool root, the session name, the
+//! Godot executable and the project directory. Resolution functions take an explicit `Context`,
+//! so tests never touch the process environment.
+
+use crate::error::{ClientError, Result};
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
+
+#[derive(Debug, Clone, Default)]
+pub struct GodotEnv {
+    pub godot_path: Option<String>,
+    pub godot: Option<String>,
+    pub console_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct Context {
+    /// The directory every session lives under.
+    pub root: PathBuf,
+    /// `DEV_BRIDGE_SESSION`, when set.
+    pub session_env: Option<String>,
+    pub cwd: PathBuf,
+    pub godot_env: GodotEnv,
+    /// Running under an MSYS shell such as Git Bash (`MSYSTEM` is set).
+    pub msystem: bool,
+    pub windows: bool,
+    pub path_var: Option<OsString>,
+}
+
+/// A variable's value, where an empty value counts as "not set".
+fn non_empty(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+impl Context {
+    /// Reads the real environment, after loading a `.env` file from the working directory or a
+    /// parent (variables that are already set win).
+    pub fn from_env() -> Self {
+        match dotenvy::dotenv() {
+            Ok(_) => {}
+            Err(error) if error.not_found() => {}
+            Err(error) => eprintln!(
+                "warning: ignoring the .env file because it could not be parsed ({error}); \
+                 put Windows paths in single quotes, e.g. GODOT_PATH='C:\\Godot\\Godot.exe'"
+            ),
+        }
+        Self {
+            root: non_empty("DEV_BRIDGE_ROOT")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| std::env::temp_dir().join("dev_bridge")),
+            session_env: non_empty("DEV_BRIDGE_SESSION"),
+            cwd: std::env::current_dir().unwrap_or_default(),
+            godot_env: GodotEnv {
+                godot_path: non_empty("GODOT_PATH"),
+                godot: non_empty("GODOT"),
+                console_path: non_empty("GODOT_CONSOLE_PATH"),
+            },
+            msystem: std::env::var_os("MSYSTEM").is_some(),
+            windows: cfg!(windows),
+            path_var: std::env::var_os("PATH"),
+        }
+    }
+
+    /// The session name: the flag, else the environment, else `default`.
+    pub fn session_name(&self, given: Option<&str>) -> String {
+        given
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+            .or_else(|| self.session_env.clone())
+            .unwrap_or_else(|| "default".to_string())
+    }
+}
+
+fn find_in_path(ctx: &Context) -> Option<PathBuf> {
+    let names: &[&str] = if ctx.windows {
+        &["godot.exe", "godot"]
+    } else {
+        &["godot"]
+    };
+    std::env::split_paths(ctx.path_var.as_ref()?)
+        .flat_map(|dir| names.iter().map(move |name| dir.join(name)))
+        .find(|candidate| candidate.is_file())
+}
+
+/// The Godot executable: `--godot`, then (on Windows) `GODOT_CONSOLE_PATH`, `GODOT_PATH`,
+/// `GODOT`, then `godot` on `PATH`. An explicit `--godot` that does not exist is an error.
+pub fn resolve_godot(ctx: &Context, explicit: Option<&str>) -> Result<PathBuf> {
+    if let Some(path) = explicit.filter(|path| !path.trim().is_empty()) {
+        let path = PathBuf::from(path);
+        return if path.is_file() {
+            Ok(path)
+        } else {
+            Err(ClientError::msg(format!(
+                "--godot {} does not exist",
+                path.display()
+            )))
+        };
+    }
+
+    let mut candidates: Vec<(&str, &Option<String>)> = Vec::new();
+    if ctx.windows {
+        candidates.push(("GODOT_CONSOLE_PATH", &ctx.godot_env.console_path));
+    }
+    candidates.push(("GODOT_PATH", &ctx.godot_env.godot_path));
+    candidates.push(("GODOT", &ctx.godot_env.godot));
+
+    let mut tried: Vec<String> = Vec::new();
+    for (name, value) in candidates {
+        let Some(value) = value else { continue };
+        let path = PathBuf::from(value);
+        if path.is_file() {
+            return Ok(path);
+        }
+        tried.push(format!("{name}={value} (not found)"));
+    }
+    if let Some(found) = find_in_path(ctx) {
+        return Ok(found);
+    }
+    tried.push("`godot` on PATH (not found)".to_string());
+    Err(ClientError::msg(format!(
+        "no Godot executable: tried {}. Pass --godot or set GODOT_PATH.",
+        tried.join(", ")
+    )))
+}
+
+fn has_project(dir: &Path) -> bool {
+    dir.join("project.godot").is_file()
+}
+
+/// The project directory: `--project`, else the first directory at or above `cwd` that holds a
+/// `project.godot`, else the single child directory of `cwd` that does.
+pub fn find_project(cwd: &Path, explicit: Option<&Path>) -> Result<PathBuf> {
+    if let Some(dir) = explicit {
+        let dir = if dir.is_absolute() {
+            dir.to_path_buf()
+        } else {
+            cwd.join(dir)
+        };
+        return if has_project(&dir) {
+            Ok(dir)
+        } else {
+            Err(ClientError::msg(format!(
+                "--project {} has no project.godot",
+                dir.display()
+            )))
+        };
+    }
+    if let Some(found) = cwd.ancestors().find(|dir| has_project(dir)) {
+        return Ok(found.to_path_buf());
+    }
+    let mut children: Vec<PathBuf> = std::fs::read_dir(cwd)
+        .map(|entries| {
+            entries
+                .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+                .filter(|path| path.is_dir() && has_project(path))
+                .collect()
+        })
+        .unwrap_or_default();
+    children.sort();
+    match children.len() {
+        1 => Ok(children.remove(0)),
+        0 => Err(ClientError::msg(format!(
+            "no project.godot in {}, above it or one level below it; pass --project",
+            cwd.display()
+        ))),
+        _ => Err(ClientError::msg(format!(
+            "several Godot projects below {}: {}; pass --project",
+            cwd.display(),
+            children
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))),
+    }
+}
