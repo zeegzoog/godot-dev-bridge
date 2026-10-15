@@ -4,6 +4,24 @@ All notable changes to godot-dev-bridge. The client and the Godot addon always s
 version number. The section for a version is used as the text of its GitHub Release, so every
 release needs one (the release workflow fails without it).
 
+## [0.2.0] - 2026-10-15
+
+### Added
+
+- `closed.json` says `game` when the game ended on its own (its code quit, or its window was
+  closed), not only when a driver or the idle time ended it. A client that finds the game gone gives
+  the reason in its error, and `sessions` shows it as `closed`.
+- `sessions --prune` removes the directories of the sessions that have ended, and the leftovers of
+  starts that failed before the game ran; it never touches a link or anything that is not a
+  session's.
+- A project command can refuse its arguments: a dictionary whose only key is `__bad_args__` is
+  answered as a `bad_args` error (exit status 1), with the value as the message.
+
+### Changed
+
+- The README says that ticks are not paced by the clock (a headless step runs thousands of them in
+  a fraction of a second) and how to give work on other threads the real time it needs.
+
 ## [0.1.0] - 2026-10-15
 
 First release: a standalone development bridge that any Godot 4.5+ project can use.
@@ -50,4 +68,5 @@ First release: a standalone development bridge that any Godot 4.5+ project can u
   deeply nested or self-referencing values are cut off, a key has one name however it is spelled,
   and an adapter that extends `Node` is freed when the session ends.
 
+[0.2.0]: https://github.com/zigenzoog/godot-dev-bridge/releases/tag/v0.2.0
 [0.1.0]: https://github.com/zigenzoog/godot-dev-bridge/releases/tag/v0.1.0
