@@ -173,6 +173,20 @@ func _initialize() -> void:
         session._complete_pending_step()
     check.equal(session.served_ids.size(), Session.SERVED_LOG_LIMIT, "only the most recent answers are remembered")
 
+    # A request file that cannot be read yet (another process still holds a fresh file, as an
+    # antivirus scan does) is not answered with an error: it is looked at again.
+    _write_request("late", 5000, "")
+    session.serve_pending()
+    check.is_true(_answer("late").is_empty(), "an unreadable request is not answered at once")
+    check.is_true(FileAccess.file_exists(_directory.path_join("cmd-5000-late.json")), "and is left where it is")
+    _write_request("late", 5000, JSON.stringify({"id": "late", "cmd": "ping"}))
+    session.serve_pending()
+    check.equal(_answer("late").result, {"pong": true}, "once it can be read it is served as usual")
+    _write_request("never", 5001, "")
+    for attempt in Session.MAX_UNREADABLE_TRIES + 1:
+        session.serve_pending()
+    check.equal(_answer("never").error.code, "bad_request", "one that never becomes readable is answered with an error in the end")
+
     var quit_answer := _ask(session, "q1", "quit")
     check.equal(quit_answer.result, {"quitting": true}, "quit is answered")
     check.is_true(session.is_quitting(), "the session knows it is ending")

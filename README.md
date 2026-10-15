@@ -157,7 +157,7 @@ godot --headless --path . --import      # first run, or after adding scripts
 for script in $(find addons tests -name '*.gd' | sort); do godot --headless --path . --check-only --script "$script" || exit 1; done
 
 # GDScript unit scripts, end-to-end and installer tests (need Godot 4.5+).
-GODOT_PATH=/path/to/godot cargo test --test gdscript_test --test e2e_test --test installer_test --test export_test -- --ignored
+GODOT_PATH=/path/to/godot cargo test --test gdscript_test --test e2e_test --test installer_test --test export_test --test load_test -- --ignored
 
 # The window screenshot needs a display, so it has a test of its own.
 GODOT_PATH=/path/to/godot cargo test --test window_test -- --ignored

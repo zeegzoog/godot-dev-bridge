@@ -27,7 +27,7 @@ Pushing a tag matching `v*.*.*` triggers `.github/workflows/release.yml`, which 
    ```bash
    godot --headless --path . --import
    for script in $(find addons tests -name '*.gd' | sort); do godot --headless --path . --check-only --script "$script" || exit 1; done
-   GODOT_PATH=/path/to/godot cargo test --test gdscript_test --test e2e_test --test installer_test --test export_test -- --ignored
+   GODOT_PATH=/path/to/godot cargo test --test gdscript_test --test e2e_test --test installer_test --test export_test --test load_test -- --ignored
    ```
 
    Stop and report if any check fails. Do not tag a red build.

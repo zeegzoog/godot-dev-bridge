@@ -33,6 +33,12 @@ func _initialize() -> void:
     var parsed: Variant = transport.read_request(pending[0])
     check.is_true(parsed is Dictionary and parsed.cmd == "ping", "a request object is parsed")
 
+    _write(directory, "cmd-29-empty.json", "")
+    var empty_entry := {"file": "cmd-29-empty.json", "seq": 29, "id": "empty"}
+    check.equal(transport.read_request(empty_entry), Transport.UNREADABLE, "an empty file is not read as a request: it may still be being handed over")
+    var missing_entry := {"file": "cmd-28-gone.json", "seq": 28, "id": "gone"}
+    check.equal(transport.read_request(missing_entry), Transport.UNREADABLE, "nor is one that cannot be opened")
+    DirAccess.remove_absolute(directory.path_join("cmd-29-empty.json"))
     _write(directory, "cmd-30-broken.json", "{not json")
     _write(directory, "cmd-31-array.json", "[1, 2]")
     var entries: Array[Dictionary] = transport.pending()

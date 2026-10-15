@@ -86,7 +86,7 @@ Before submitting or committing changes, run the complete pipeline:
 4. GDScript unit scripts, end-to-end, installer and export tests, whenever `addons/`, `tests/fixtures/` or anything the client does with a session (`src/launch.rs`, `src/session.rs`, `src/spool.rs`) changed (needs Godot 4.5+):
 
    ```bash
-   GODOT_PATH=/path/to/godot cargo test --test gdscript_test --test e2e_test --test installer_test --test export_test -- --ignored
+   GODOT_PATH=/path/to/godot cargo test --test gdscript_test --test e2e_test --test installer_test --test export_test --test load_test -- --ignored
    ```
 
 5. The window screenshot needs a display, so it is not part of step 4. Run it on a machine with one whenever `shot`, the observer or the fixture changed (on a headless Linux machine, under `xvfb-run`, as CI does):

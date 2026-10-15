@@ -35,6 +35,8 @@ First release: a standalone development bridge that any Godot 4.5+ project can u
   project that does not run at 60 ticks per second is still stepped exactly. The executable is run as
   it is on every platform (no console wrapper is needed for `game.log`), and a `shot` to a path that
   cannot be written answers `bad_args`.
+- A request file that the game cannot read yet (Windows may hold a fresh file for a moment when many
+  clients write at once) is looked at again instead of being answered as malformed.
 - `ready.json` and `status` say whether the project adapter was found and registered (`adapter`),
   and why not.
 - A usage mistake is answered with the client error object as well as clap's explanation, so every

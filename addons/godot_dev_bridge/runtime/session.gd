@@ -27,6 +27,10 @@ const SERVED_LOG_LIMIT: int = 64
 ## The widest screenshot a `shot` may be scaled to: the engine's largest image side.
 const MAX_SHOT_WIDTH: int = 16384
 
+## How many times a request file that cannot be read yet is looked at again, a few milliseconds
+## apart, before it is answered as malformed.
+const MAX_UNREADABLE_TRIES: int = 500
+
 ## How long a parked session sleeps between looks at the spool directory.
 const POLL_MILLISECONDS: int = 2
 
@@ -51,6 +55,7 @@ var _quitting: bool = false
 var _controller := STEP_CONTROLLER.new()
 var _input := INPUT_INJECTOR.new()
 var _observer: Variant
+var _unreadable: Dictionary = {}  # request file name -> how many times it could not be read
 var _pending_step: Dictionary = {}  # {entry, id, until} while a step runs, else empty
 var _last_activity_msec: int = 0
 var _frames_at_step_start: int = 0
@@ -253,6 +258,13 @@ func _serve(entry: Dictionary) -> void:
     var parsed: Variant = _transport.read_request(entry)
     var id: String = entry.id
     var outcome: Dictionary
+    if parsed is StringName and parsed == TRANSPORT.UNREADABLE:
+        var tries: int = int(_unreadable.get(entry.file, 0)) + 1
+        if tries < MAX_UNREADABLE_TRIES:
+            _unreadable[entry.file] = tries
+            return
+        parsed = null
+    _unreadable.erase(entry.file)
     if parsed == null:
         outcome = _error("bad_request", "The request is not a JSON object.")
     else:

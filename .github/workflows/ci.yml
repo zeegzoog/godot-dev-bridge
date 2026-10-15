@@ -66,7 +66,7 @@ jobs:
           done
 
       - name: GDScript unit scripts and end-to-end tests against a real Godot
-        run: cargo test --test gdscript_test --test e2e_test --test installer_test --test export_test -- --ignored --test-threads=2
+        run: cargo test --test gdscript_test --test e2e_test --test installer_test --test export_test --test load_test -- --ignored --test-threads=2
 
       # The screenshot of a real window: a virtual display and Mesa's software renderers stand in
       # for a monitor and a graphics card.
@@ -100,4 +100,4 @@ jobs:
 
       - name: GDScript unit scripts and end-to-end tests against a real Godot
         shell: bash
-        run: cargo test --test gdscript_test --test e2e_test --test installer_test --test export_test -- --ignored --test-threads=2
+        run: cargo test --test gdscript_test --test e2e_test --test installer_test --test export_test --test load_test -- --ignored --test-threads=2

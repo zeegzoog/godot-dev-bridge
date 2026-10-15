@@ -9,6 +9,11 @@ const REQUEST_PREFIX := "cmd-"
 const RESPONSE_PREFIX := "resp-"
 const SUFFIX := ".json"
 
+## What `read_request` answers for a file that cannot be read as a request yet: it could not be
+## opened (another process still holds a fresh file, as an antivirus scan does for a moment) or it
+## is empty (a request is never empty). The caller leaves the file and looks again.
+const UNREADABLE := &"unreadable"
+
 var directory: String
 
 func _init(spool_directory: String) -> void:
@@ -36,9 +41,15 @@ func pending() -> Array[Dictionary]:
     return found
 
 ## The parsed content of a request file: a `Dictionary` when it is a JSON object, `null` when it is
-## not valid JSON or not an object.
+## not valid JSON or not an object, `UNREADABLE` when it cannot be read yet.
 func read_request(entry: Dictionary) -> Variant:
-    var text := FileAccess.get_file_as_string(directory.path_join(entry.file))
+    var file := FileAccess.open(directory.path_join(entry.file), FileAccess.READ)
+    if file == null:
+        return UNREADABLE
+    var text := file.get_as_text()
+    file.close()
+    if text.is_empty():
+        return UNREADABLE
     var json := JSON.new()  # not `parse_string`: that logs an engine error for every malformed request
     if json.parse(text) != OK:
         return null
