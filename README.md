@@ -163,6 +163,10 @@ Nothing to configure. The plugin's export plugin leaves `runtime/`, the plugin s
 adapter out of every non-debug export. Only the inert autoload stub ships, and without `runtime/`
 there is nothing for a launch flag to switch on. The stub also checks `OS.is_debug_build()` itself.
 
+Do not give your adapter a `class_name`. The adapter script is left out of non-debug exports, but a
+`class_name` stays in the exported game's list of global classes and would point at a file that is
+not there. An adapter is loaded by its path from the project setting, so it does not need one.
+
 ## Guarantees and limits
 
 - Development only: off unless enabled at launch, never on in a non-debug build.

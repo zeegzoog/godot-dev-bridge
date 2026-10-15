@@ -39,14 +39,37 @@ fn the_addon_has_scripts_to_scan() {
     assert!(gd_files(&addon()).len() >= 10, "{:?}", gd_files(&addon()));
 }
 
+/// A `class_name` registers a global class. A script that is left out of an export still leaves its
+/// class in the exported game's class list (checked with a real export), and a class of the addon
+/// could collide with one of the project it is installed in, so no script of the addon declares one.
 #[test]
-fn runtime_scripts_declare_no_class_name() {
-    for path in gd_files(&addon().join("runtime")) {
+fn no_addon_script_declares_a_class_name() {
+    for path in gd_files(&addon()) {
         let offending = text(&path)
             .lines()
             .any(|line| line.trim_start().starts_with("class_name"));
         assert!(!offending, "{} declares a class_name", path.display());
     }
+}
+
+/// Godot asks export plugins in the order of their names, and the first one to skip or replace a
+/// file ends the chain. The built-in "GDScript" plugin compiles every script as soon as it is asked,
+/// so a plugin named after it would never see a script and could not leave one out.
+#[test]
+fn the_export_plugin_is_asked_before_the_builtin_gdscript_plugin() {
+    let source = text(&addon().join("export_plugin.gd"));
+    let after = source
+        .split("func _get_name()")
+        .nth(1)
+        .expect("export_plugin.gd defines _get_name");
+    let name = after
+        .split('"')
+        .nth(1)
+        .expect("_get_name returns a string literal");
+    assert!(
+        name < "GDScript",
+        "the export plugin is named '{name}', which sorts after the built-in \"GDScript\" plugin"
+    );
 }
 
 #[test]

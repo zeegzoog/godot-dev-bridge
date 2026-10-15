@@ -37,8 +37,12 @@ edit scenes in the editor.
 
 - Inactive unless `--bridge-dir=` is given, never active when `OS.is_debug_build()` is false.
 - `export_plugin.gd` keeps `runtime/*`, the plugin scripts and the project adapter out of non-debug
-  exports (its name must sort before the built-in `GDScript` export plugin, or it never sees a
-  script); `tests/export_test.rs` exports a real pack to prove it. Never weaken either lock.
+  exports. Godot asks export plugins in the order of their names and the first one to skip or
+  replace a file ends the chain, so the plugin's name must sort before the built-in `GDScript`
+  plugin (it compiles every script as soon as it is asked, and would hide the scripts from this
+  one). The rule that decides what to skip lives in `export_policy.gd`, because an
+  `EditorExportPlugin` cannot be created outside the editor and the rule must be testable;
+  `tests/export_test.rs` exports a real pack to prove the result. Never weaken either lock.
 
 ### 4. Every request gets an answer
 
@@ -49,7 +53,9 @@ edit scenes in the editor.
 
 ### 5. Reusable core
 
-- Nothing in the addon names a project class or `res://src`. Runtime scripts have no `class_name`.
+- Nothing in the addon names a project class or `res://src`. No script of the addon declares a
+  `class_name`: a script left out of an export still leaves its class in the exported game's class
+  list, and a class could collide with one of the project the addon is installed in.
   Project knowledge enters only through the adapter (`register(registry)`).
 
 ## Implementation Standards
