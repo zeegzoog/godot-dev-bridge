@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 authors = ["Oleg Alexandrov <alexandrovoleg.ru@gmail.com>"]
-description = "Drive a running Godot 4 game from a shell: hold it still, step it by exact ticks, inject input, read state, take screenshots"
+description = "Drive a running Godot game from a shell: hold it still, step it by exact ticks, inject input, read state, take screenshots"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/zigenzoog/godot-dev-bridge"
@@ -28,4 +28,8 @@ strip = true
 libc = "0.2.190"
 
 [target."cfg(windows)".dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Console", "Win32_System_Threading"] }
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_System_Console",
+    "Win32_System_Threading",
+] }
