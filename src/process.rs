@@ -44,23 +44,21 @@ pub fn is_alive(pid: u32) -> bool {
     }
 }
 
+/// Ends the process and everything it started: Godot's console wrapper (`GODOT_CONSOLE_PATH`) runs
+/// the engine as a child, and killing the wrapper alone would leave the game running.
 #[cfg(windows)]
 pub fn kill(pid: u32) {
-    use windows_sys::Win32::Foundation::CloseHandle;
-    use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess};
+    use std::process::{Command, Stdio};
 
-    const PROCESS_TERMINATE: u32 = 0x0001;
     if pid == 0 {
         return;
     }
-    // SAFETY: plain Win32 calls on a handle that is opened and closed here.
-    unsafe {
-        let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
-        if (handle as usize) != 0 {
-            TerminateProcess(handle, 1);
-            CloseHandle(handle);
-        }
-    }
+    let _ = Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
 }
 
 #[cfg(test)]
@@ -76,6 +74,39 @@ mod tests {
     fn zero_and_unused_ids_are_not_alive() {
         assert!(!is_alive(0));
         assert!(!is_alive(u32::MAX - 1));
+    }
+
+    /// Godot's console wrapper starts the engine as a child, so ending a game means ending a tree.
+    #[cfg(windows)]
+    #[test]
+    fn killing_a_process_also_ends_its_children() {
+        use std::io::Read;
+        use std::process::Stdio;
+        use std::sync::mpsc::channel;
+        use std::time::Duration;
+
+        let mut parent = std::process::Command::new("cmd")
+            .args(["/C", "ping -n 60 127.0.0.1"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let mut stdout = parent.stdout.take().unwrap();
+        std::thread::sleep(Duration::from_millis(700)); // let cmd start its child
+        kill(parent.id());
+        let (done, finished) = channel();
+        std::thread::spawn(move || {
+            let mut sink = Vec::new();
+            let _ = stdout.read_to_end(&mut sink);
+            let _ = done.send(());
+        });
+        // The child holds the pipe's write end: the pipe closes only when the whole tree is gone.
+        assert!(
+            finished.recv_timeout(Duration::from_secs(5)).is_ok(),
+            "a child of the killed process is still running"
+        );
+        let _ = parent.wait();
     }
 
     #[test]

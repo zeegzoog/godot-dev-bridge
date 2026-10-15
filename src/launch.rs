@@ -164,7 +164,33 @@ fn detach(command: &mut Command) {
     use std::os::windows::process::CommandExt;
     const DETACHED_PROCESS: u32 = 0x0000_0008;
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    keep_own_handles_private();
     command.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+}
+
+/// Windows lets a child inherit every inheritable handle of its parent, and the pipe this client's
+/// output goes through is one. The game would then hold that pipe open for as long as it runs, and a
+/// caller that waits for the pipe to close (an agent's shell tool, `Command::output()`) would wait
+/// for the game to exit instead of for this client. The game's own standard handles are passed
+/// explicitly, so only this client's are made private.
+#[cfg(windows)]
+fn keep_own_handles_private() {
+    use windows_sys::Win32::Foundation::{HANDLE_FLAG_INHERIT, SetHandleInformation};
+    use windows_sys::Win32::System::Console::{
+        GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+    };
+
+    for which in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+        // SAFETY: plain Win32 calls on this process's own standard handles; an invalid or missing
+        // handle (no console, closed stream) is skipped.
+        unsafe {
+            let handle = GetStdHandle(which);
+            let address = handle as isize;
+            if address != 0 && address != -1 {
+                SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0);
+            }
+        }
+    }
 }
 
 #[cfg(unix)]
