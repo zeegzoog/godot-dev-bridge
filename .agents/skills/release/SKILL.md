@@ -66,8 +66,6 @@ Pushing a tag matching `v*.*.*` triggers `.github/workflows/release.yml`, which 
 
    Confirm all 5 assets are attached: 4 binary archives (`godot-dev-bridge-<target>.{zip,tar.gz}`) plus `godot-dev-bridge-addon.zip` (the Godot Editor plugin, platform-independent) — see the asset table in `README.md`.
 
-9. **Optional:** refresh the local `bin/` convenience copy from `target/release` for local MCP client configs (see the "Cutting a release" note in `README.md`). This is a personal dev-environment step, not part of the release itself.
-
 ## Notes
 
 - Tag format must be exactly `v*.*.*` (e.g. `v0.2.0`) — the workflow only triggers on that glob.

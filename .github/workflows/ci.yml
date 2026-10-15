@@ -62,4 +62,4 @@ jobs:
           done
 
       - name: GDScript unit scripts and end-to-end tests against a real Godot
-        run: cargo test --test gdscript_test --test e2e_test --test installer_test -- --ignored --test-threads=2
+        run: cargo test --test gdscript_test --test e2e_test --test installer_test --test export_test -- --ignored --test-threads=2

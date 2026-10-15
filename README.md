@@ -11,12 +11,11 @@ is made for developers and AI agents that need to *look at and play* a game whil
   or mouse, so game code cannot tell the difference.
 - **One native binary, one folder.** The client has no runtime dependencies; the addon is one folder
   that installs itself when you enable the plugin. No server, no port: client and game talk through
-  files in a temporary directory.
+  files in a directory private to your user.
 - **Development only.** Inactive unless enabled at launch, never active in a release build, and left
   out of non-debug exports automatically.
 
-It complements [godot-mcp](https://github.com/zigenzoog/godot-mcp): that one edits the scenes of the
-*editor*, this one drives the *running game*.
+It drives the *running game*; it does not edit scenes in the editor.
 
 ## Installation
 
@@ -132,17 +131,22 @@ func _heal(args: Dictionary) -> Dictionary:
 
 Then pick the script in **Project Settings → Godot Dev Bridge → Adapter** (the setting
 `godot_dev_bridge/adapter`). A state provider takes no arguments and returns a value; a command
-takes the JSON arguments as a dictionary and returns a value. Values are converted to JSON like the
+takes exactly one argument, the JSON arguments as a dictionary, and returns a value (a handler with
+another signature is refused with a warning in the game's log). A command that can fail should
+return a dictionary with an `error` entry: a script error inside a command cannot be told from a
+command that returns nothing, so it answers `null`, and the engine only logs the error. Values are converted to JSON like the
 result of `eval`. A provider should answer an empty value, not an error, while what it reads does
 not exist (a menu has no player). The names of the core commands are reserved. Read it back with
 `godot-dev-bridge state player` and `godot-dev-bridge do heal '{"amount": 3}'`.
 
 ## Sessions and launch arguments
 
-A session is a name (`--session`, then `DEV_BRIDGE_SESSION`, then `default`) and a directory
-`<temporary directory>/dev_bridge/<name>/` (`DEV_BRIDGE_ROOT` moves the root) that holds
-`session.json`, `ready.json`, the request and response files, `closed.json`, `game.log` and
-`shots/`. A game that receives no request for 30 minutes ends itself.
+A session is a name (`--session`, then `DEV_BRIDGE_SESSION`, then `default`; 1 to 64 letters, digits,
+`.`, `_` or `-`) and a directory below the spool root that holds `session.json`, `ready.json`, the
+request and response files, `closed.json`, `game.log` and `shots/`. The root is
+`<temporary directory>/dev_bridge` on Windows and macOS, and on Linux `$XDG_RUNTIME_DIR/dev_bridge`
+(or `<temporary directory>/dev_bridge-<user id>`), created for your user alone. `DEV_BRIDGE_ROOT`
+moves it. A game that receives no request for 30 minutes ends itself.
 
 `start` passes these after `--` on the Godot command line; you can also use them by hand:
 
@@ -162,7 +166,8 @@ there is nothing for a launch flag to switch on. The stub also checks `OS.is_deb
 ## Guarantees and limits
 
 - Development only: off unless enabled at launch, never on in a non-debug build.
-- No network: only files in the launching user's temporary folder.
+- No network: only files in a directory that only the launching user can use (the client refuses a
+  directory that belongs to another user, or a symbolic link).
 - Input parity: injected input goes through `Input.parse_input_event()`.
 - Controlled time: exact stepping needs the fixed frame rate that `start` sets (`status` reports
   `deterministic`). Work on other threads and the file system finishes in real time, so wait for
@@ -183,7 +188,7 @@ godot --headless --path . --import      # first run, or after adding scripts
 godot --headless --path . --check-only --script addons/godot_dev_bridge/plugin.gd
 
 # GDScript unit scripts, end-to-end and installer tests (need Godot 4.5+).
-GODOT_PATH=/path/to/godot cargo test --test gdscript_test --test e2e_test --test installer_test -- --ignored
+GODOT_PATH=/path/to/godot cargo test --test gdscript_test --test e2e_test --test installer_test --test export_test -- --ignored
 ```
 
 **Releasing:** add a section for the version to [CHANGELOG.md](CHANGELOG.md), bump the version in

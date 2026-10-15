@@ -6,8 +6,7 @@ release needs one (the release workflow fails without it).
 
 ## [0.1.0] - 2026-10-15
 
-First release: the successor of the `dev_bridge` addon of the treaker project, rebuilt as a
-standalone product that any Godot 4.5+ project can use.
+First release: a standalone development bridge that any Godot 4.5+ project can use.
 
 ### Added
 
@@ -21,8 +20,14 @@ standalone product that any Godot 4.5+ project can use.
   non-debug export, so a release build cannot contain the bridge.
 - The native client `godot-dev-bridge` (Windows, Linux, macOS Intel and Apple Silicon): one command
   per run, one JSON object on standard output, exit status 0, 1 or 2.
-- `start` finds the project from the working directory, accepts `--scene`, and explains a project
-  that was never imported.
-- Protocol version 1, unchanged from `dev_bridge`: existing adapters work as they are.
+- `start` finds the project from the working directory, accepts `--scene`, and refuses a project
+  that was never imported, naming the command to run.
+- Protocol version 1: the request and response files, the error codes, the verbs and the exit
+  statuses are the contract.
+- Session names are validated and the spool directory is private to the user (on Unix: mode 0700,
+  a per-user location, no symbolic links, no other owner), so a session name cannot point outside
+  the spool root and another local user cannot drive a game.
+- `start` and `stop` recognise the recorded game by its creation time (Windows, Linux), so a process
+  that was handed the pid of a game that died is never mistaken for it or killed.
 
 [0.1.0]: https://github.com/zigenzoog/godot-dev-bridge/releases/tag/v0.1.0

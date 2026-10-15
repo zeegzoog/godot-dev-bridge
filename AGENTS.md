@@ -7,32 +7,38 @@ agents and human contributors working on godot-dev-bridge.
 
 A reusable development bridge for any Godot 4.5+ project: a shell (or an agent with a shell) starts
 the running game, holds it still, steps it by an exact number of physics ticks, injects input, reads
-state and takes screenshots of the window the game drew. It drives the **running game**; editing the
-**editor's scenes** is `godot-mcp`'s job, not this repository's.
+state and takes screenshots of the window the game drew. It drives the **running game**; it does not
+edit scenes in the editor.
 
 ## Architecture Guidelines
 
 ### 1. Files, not sockets
 
-- Client and game talk through a spool directory (`<temp>/dev_bridge/<session>/`): one
+- Client and game talk through a spool directory (`dev_bridge/<session>/` under a root that only
+  the user can use; the session name is validated, because starting a session clears its
+  directory): one
   `cmd-<seq>-<id>.json` per request, one `resp-<id>.json` per answer. Writers create `<name>.tmp` and
   rename; readers ignore `*.tmp`. The addon must never open a network endpoint (a test scans for
   the classes).
-- The wire protocol (version 1) is a contract shared with existing adapters and the treaker project:
-  do not change message shapes, error codes, verbs or exit statuses without a version bump.
+- The wire protocol (version 1) is a contract for existing adapters and clients: do not change
+  message shapes, error codes, verbs or exit statuses without a version bump.
 
 ### 2. Parked main loop
 
 - The autoload stub runs at the lowest physics priority and parks the main loop inside its physics
   callback; `step N` lets exactly N ticks run. Exact stepping needs `--fixed-fps` equal to the physics
-  rate, declared as `--bridge-fixed-fps`. Reference for the measured behaviour:
-  treaker's `l2-godot-dev-automation.md` sections 5.4 to 5.8.
+  rate, declared as `--bridge-fixed-fps`; under it every tick is paired with one process frame, and
+  while parked no tick, frame, awaited signal or timer advances.
+- An injected press is seen as "just pressed" on the second tick after the park point, so a tap lasts
+  two ticks by default. These facts were measured and are pinned by `tests/e2e_test.rs`; do not
+  change them without measuring again.
 
 ### 3. Development only, impossible to ship by accident
 
 - Inactive unless `--bridge-dir=` is given, never active when `OS.is_debug_build()` is false.
 - `export_plugin.gd` keeps `runtime/*`, the plugin scripts and the project adapter out of non-debug
-  exports. Never weaken either lock.
+  exports (its name must sort before the built-in `GDScript` export plugin, or it never sees a
+  script); `tests/export_test.rs` exports a real pack to prove it. Never weaken either lock.
 
 ### 4. Every request gets an answer
 
@@ -92,7 +98,7 @@ Before submitting or committing changes, run the complete pipeline:
    changed (needs Godot 4.5+; set `GODOT_CONSOLE_PATH` as well on Windows):
 
    ```bash
-   GODOT_PATH=/path/to/godot cargo test --test gdscript_test --test e2e_test --test installer_test -- --ignored
+   GODOT_PATH=/path/to/godot cargo test --test gdscript_test --test e2e_test --test installer_test --test export_test -- --ignored
    ```
 
 The version in `addons/godot_dev_bridge/plugin.cfg` must always equal `Cargo.toml`; bump both
