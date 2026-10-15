@@ -3,66 +3,9 @@
 
 mod common;
 
+use common::Bridge;
 use godot_dev_bridge::process::is_alive;
 use serde_json::Value;
-use std::process::Command;
-use std::time::Duration;
-
-struct Bridge {
-    root: tempfile::TempDir,
-    session: String,
-}
-
-impl Bridge {
-    fn new(session: &str) -> Self {
-        common::ensure_imported(&common::godot_path());
-        Self {
-            root: tempfile::tempdir().unwrap(),
-            session: session.to_string(),
-        }
-    }
-
-    fn command(&self, args: &[&str]) -> Command {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_godot-dev-bridge"));
-        command
-            .args(["--session", &self.session])
-            .args(args)
-            .current_dir(common::project_root())
-            .env("DEV_BRIDGE_ROOT", self.root.path())
-            .env("GODOT_PATH", common::godot_path())
-            .env_remove("GODOT_CONSOLE_PATH");
-        command
-    }
-
-    /// Runs the client; returns its exit status and the JSON object it printed.
-    fn run(&self, args: &[&str]) -> (i32, Value) {
-        let (status, stdout, stderr) =
-            common::run_client(self.command(args), Duration::from_secs(120));
-        let value = serde_json::from_str(stdout.trim())
-            .unwrap_or_else(|error| panic!("not JSON ({error}): stdout={stdout} stderr={stderr}"));
-        (status, value)
-    }
-
-    fn ok(&self, args: &[&str]) -> Value {
-        let (status, answer) = self.run(args);
-        assert_eq!(status, 0, "{args:?} -> {answer}");
-        answer
-    }
-
-    fn start(&self) -> Value {
-        self.ok(&["start", "--headless"])
-    }
-
-    fn ticker(&self) -> Value {
-        self.ok(&["state", "ticker"])["result"]["ticker"].clone()
-    }
-}
-
-impl Drop for Bridge {
-    fn drop(&mut self) {
-        let _ = self.command(&["stop"]).output();
-    }
-}
 
 #[test]
 #[ignore = "needs a Godot executable: set GODOT_PATH"]
@@ -279,22 +222,4 @@ fn stop_ends_the_game_and_a_stale_session_can_be_replaced() {
         "a stale session is replaced by a fresh one"
     );
     assert_eq!(bridge.ticker()["ticks"], 0);
-}
-
-/// Needs a display, so it only runs when asked: `DEV_BRIDGE_WINDOW_TESTS=1`.
-#[test]
-#[ignore = "needs a Godot executable and a display: set GODOT_PATH and DEV_BRIDGE_WINDOW_TESTS=1"]
-fn a_windowed_session_saves_a_screenshot_of_the_window() {
-    if std::env::var("DEV_BRIDGE_WINDOW_TESTS").is_err() {
-        eprintln!("skipped: set DEV_BRIDGE_WINDOW_TESTS=1 on a machine with a display");
-        return;
-    }
-    let bridge = Bridge::new("window");
-    bridge.ok(&["start", "--window", "320x200"]);
-    bridge.ok(&["step", "3"]);
-    let target = bridge.root.path().join("window.png");
-    let shot = bridge.ok(&["shot", target.to_str().unwrap(), "--width", "160"]);
-    assert_eq!(shot["result"]["size"], serde_json::json!([160, 100]));
-    let bytes = std::fs::read(&target).unwrap();
-    assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n");
 }

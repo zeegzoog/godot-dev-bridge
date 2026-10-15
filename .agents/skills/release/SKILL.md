@@ -7,26 +7,27 @@ description: Cut a new godot-dev-bridge release - bump the version, run QA gates
 
 ## Overview
 
-Pushing a tag matching `v*.*.*` triggers `.github/workflows/release.yml`, which builds `godot-dev-bridge` for Windows x86_64, Linux x86_64, macOS x86_64, and macOS aarch64, and attaches the archives to a GitHub Release. This skill walks through the steps in order — skipping the QA gate or getting the tag format wrong produces a broken or missing release.
+Pushing a tag matching `v*.*.*` triggers `.github/workflows/release.yml`, which verifies the tag, builds `godot-dev-bridge` for Windows x86_64, Linux x86_64, macOS x86_64, and macOS aarch64, packages the addon, and then one `publish` job creates the GitHub Release with every archive attached. This skill walks through the steps in order — skipping the QA gate or getting the tag format wrong produces a broken or missing release.
 
 ## Procedure
 
 1. **Determine the new version.** Read the current version from `Cargo.toml` (`[package] version`). If the user didn't specify a target version, ask them, or propose a semver bump (patch/minor/major) based on what changed since the last tag (`git log <last-tag>..HEAD --oneline`). Don't guess silently.
 
-2. **Preflight — all must pass before continuing:**
+2. **Preflight — all must pass before continuing.** This is the pipeline of the "Quality Assurance & Verification Protocols" section of `AGENTS.md`; run it as written there, in this order:
 
    ```bash
    git status --porcelain          # must be empty; stop and ask if it isn't
    cargo fmt --all -- --check
    cargo clippy --all-targets --all-features -- -D warnings
-   cargo test
+   cargo test --all-targets
    ```
 
-   If a Godot binary is reachable (`GODOT_PATH` in `.env`, or `godot` on `PATH`), also run (the repo root is itself a minimal Godot project so `class_name` resolves — `--path .` is required, and `--import` must run at least once for a fresh `.godot/` cache):
+   A Godot 4.5+ binary is needed for the rest (`GODOT_PATH`, in `.env` or the environment). If none is reachable, stop and say so: a release must not go out without the Godot checks. The repo root is itself a minimal Godot project (`--path .` is required, and `--import` must run once for a fresh `.godot/` cache):
 
    ```bash
    godot --headless --path . --import
-   godot --headless --check-only --path . --script addons/godot_dev_bridge/plugin.gd
+   for script in $(find addons tests -name '*.gd' | sort); do godot --headless --path . --check-only --script "$script" || exit 1; done
+   GODOT_PATH=/path/to/godot cargo test --test gdscript_test --test e2e_test --test installer_test --test export_test -- --ignored
    ```
 
    Stop and report if any check fails. Do not tag a red build.
@@ -56,7 +57,7 @@ Pushing a tag matching `v*.*.*` triggers `.github/workflows/release.yml`, which 
    gh run watch $(gh run list --workflow=release.yml -L 1 --json databaseId -q '.[0].databaseId')
    ```
 
-   All 6 jobs (`verify`, `addon`, plus the 4 binary matrix targets `x86_64-pc-windows-msvc`, `x86_64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin`) must succeed.
+   All 7 jobs (`verify`, `addon`, the 4 binary matrix targets `x86_64-pc-windows-msvc`, `x86_64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin`, and `publish`, which creates the release) must succeed. If `publish` fails after the builds passed, re-run that job only.
 
 8. **Verify the release:**
 

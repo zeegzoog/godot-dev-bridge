@@ -6,6 +6,8 @@ pub mod msys;
 pub mod process;
 pub mod session;
 pub mod spool;
+#[cfg(windows)]
+mod winsec;
 
 use clap::Parser;
 use cli::{Cli, Verb};
@@ -18,6 +20,8 @@ use std::time::Duration;
 
 const DEFAULT_TIMEOUT: f64 = 30.0;
 const START_TIMEOUT: f64 = 90.0;
+/// One year: far beyond any wait, and small enough for every clock arithmetic.
+const MAX_TIMEOUT: f64 = 31_536_000.0;
 
 fn timeout_for(cli: &Cli) -> Result<Duration> {
     let seconds = cli.timeout.unwrap_or(match cli.verb {
@@ -28,6 +32,11 @@ fn timeout_for(cli: &Cli) -> Result<Duration> {
         return Err(ClientError::msg(
             "--timeout must be a positive number of seconds",
         ));
+    }
+    if seconds > MAX_TIMEOUT {
+        return Err(ClientError::msg(format!(
+            "--timeout must be at most {MAX_TIMEOUT} seconds (one year)"
+        )));
     }
     Ok(Duration::from_secs_f64(seconds))
 }
@@ -67,25 +76,48 @@ fn execute(cli: &Cli, ctx: &Context) -> Result<(i32, Value)> {
     }
 }
 
+fn client_error(message: &str) -> Value {
+    json!({"ok": false, "error": {"code": "client", "message": message}})
+}
+
+/// The one line of a usage error that names the problem, for the JSON object.
+fn usage_message(error: &clap::Error) -> String {
+    use clap::error::ErrorKind;
+    if error.kind() == ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand {
+        return "no command given; run with --help to list them".to_string();
+    }
+    let text = error.to_string();
+    let mut lines = text.lines().map(str::trim).filter(|line| !line.is_empty());
+    let first = lines.next().unwrap_or("usage error");
+    let mut message = first.strip_prefix("error: ").unwrap_or(first).to_string();
+    if message.ends_with(':') {
+        // "the following required arguments were not provided:" names them on the next line.
+        if let Some(detail) = lines.next() {
+            message.push(' ');
+            message.push_str(detail);
+        }
+    }
+    format!("{message}; run with --help for the usage")
+}
+
 /// Runs one command line. Returns the exit status and the JSON object to print; `None` means clap
-/// already printed the usage or help text.
+/// printed help or the version (a success). A usage error gets clap's explanation on standard error
+/// and the usual client error object, like every other failure.
 pub fn run(argv: Vec<String>, ctx: &Context) -> (i32, Option<Value>) {
     let cli = match Cli::try_parse_from(argv) {
         Ok(cli) => cli,
         Err(error) => {
             let _ = error.print();
-            return (if error.use_stderr() { 2 } else { 0 }, None);
+            return if error.use_stderr() {
+                (2, Some(client_error(&usage_message(&error))))
+            } else {
+                (0, None)
+            };
         }
     };
     match execute(&cli, ctx) {
         Ok((status, output)) => (status, Some(output)),
-        Err(error) => (
-            2,
-            Some(json!({
-                "ok": false,
-                "error": {"code": "client", "message": error.to_string()},
-            })),
-        ),
+        Err(error) => (2, Some(client_error(&error.to_string()))),
     }
 }
 

@@ -3,6 +3,7 @@
 //! so tests never touch the process environment.
 
 use crate::error::{ClientError, Result};
+use std::cell::OnceCell;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
@@ -10,7 +11,6 @@ use std::path::{Path, PathBuf};
 pub struct GodotEnv {
     pub godot_path: Option<String>,
     pub godot: Option<String>,
-    pub console_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -23,6 +23,10 @@ pub struct Context {
     pub godot_env: GodotEnv,
     /// Running under an MSYS shell such as Git Bash (`MSYSTEM` is set).
     pub msystem: bool,
+    /// `EXEPATH` (Git Bash): where the MSYS root can be found when `cygpath` is not at hand.
+    pub exepath: Option<String>,
+    /// The MSYS root, looked up on first use (see `Context::msys_root`).
+    pub msys_root: OnceCell<Option<String>>,
     pub windows: bool,
     pub path_var: Option<OsString>,
 }
@@ -67,12 +71,21 @@ impl Context {
             godot_env: GodotEnv {
                 godot_path: non_empty("GODOT_PATH"),
                 godot: non_empty("GODOT"),
-                console_path: non_empty("GODOT_CONSOLE_PATH"),
             },
             msystem: std::env::var_os("MSYSTEM").is_some(),
+            exepath: non_empty("EXEPATH"),
+            msys_root: OnceCell::new(),
             windows: cfg!(windows),
             path_var: std::env::var_os("PATH"),
         }
+    }
+
+    /// The directory an MSYS shell maps `/` to, as a Windows path with forward slashes. Looked up
+    /// once, and only by a command that was given a path that the shell rewrote.
+    pub fn msys_root(&self) -> Option<String> {
+        self.msys_root
+            .get_or_init(|| crate::msys::detect_root(self.exepath.as_deref()))
+            .clone()
     }
 
     /// The session name: the flag, else the environment, else `default`.
@@ -109,13 +122,15 @@ fn effective_uid() -> Option<u32> {
     None
 }
 
-/// `path` itself when it is absolute, otherwise `path` below `cwd`.
+/// `path` itself when it is absolute, otherwise `path` below `cwd`, with the platform's own
+/// separators throughout (a `DEV_BRIDGE_ROOT` written with `/` would otherwise print mixed ones).
 pub fn absolutize(cwd: &Path, path: &Path) -> PathBuf {
-    if path.is_absolute() {
+    let joined = if path.is_absolute() {
         path.to_path_buf()
     } else {
         cwd.join(path)
-    }
+    };
+    joined.components().collect()
 }
 
 /// A session name becomes a directory name below the spool root, and starting a session clears
@@ -149,8 +164,8 @@ fn find_in_path(ctx: &Context) -> Option<PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
-/// The Godot executable: `--godot`, then (on Windows) `GODOT_CONSOLE_PATH`, `GODOT_PATH`,
-/// `GODOT`, then `godot` on `PATH`. An explicit `--godot` that does not exist is an error.
+/// The Godot executable: `--godot`, then `GODOT_PATH`, `GODOT`, then `godot` on `PATH`. An
+/// explicit `--godot` that does not exist is an error.
 pub fn resolve_godot(ctx: &Context, explicit: Option<&str>) -> Result<PathBuf> {
     if let Some(path) = explicit.filter(|path| !path.trim().is_empty()) {
         let path = PathBuf::from(path);
@@ -164,12 +179,10 @@ pub fn resolve_godot(ctx: &Context, explicit: Option<&str>) -> Result<PathBuf> {
         };
     }
 
-    let mut candidates: Vec<(&str, &Option<String>)> = Vec::new();
-    if ctx.windows {
-        candidates.push(("GODOT_CONSOLE_PATH", &ctx.godot_env.console_path));
-    }
-    candidates.push(("GODOT_PATH", &ctx.godot_env.godot_path));
-    candidates.push(("GODOT", &ctx.godot_env.godot));
+    let candidates = [
+        ("GODOT_PATH", &ctx.godot_env.godot_path),
+        ("GODOT", &ctx.godot_env.godot),
+    ];
 
     let mut tried: Vec<String> = Vec::new();
     for (name, value) in candidates {
@@ -192,6 +205,25 @@ pub fn resolve_godot(ctx: &Context, explicit: Option<&str>) -> Result<PathBuf> {
 
 fn has_project(dir: &Path) -> bool {
     dir.join("project.godot").is_file()
+}
+
+/// The physics tick rate a project sets (`physics/common/physics_ticks_per_second` in
+/// `project.godot`), or `None` when it keeps the engine default or the file cannot be read.
+pub fn project_physics_rate(project: &Path) -> Option<u32> {
+    let text = std::fs::read_to_string(project.join("project.godot")).ok()?;
+    let mut in_physics = false;
+    for line in text.lines().map(str::trim) {
+        if line.starts_with('[') {
+            in_physics = line == "[physics]";
+        } else if in_physics {
+            if let Some(value) = line.strip_prefix("common/physics_ticks_per_second=") {
+                let rate: f64 = value.trim().parse().ok()?;
+                return (rate >= 1.0 && rate.fract() == 0.0 && rate <= f64::from(u32::MAX))
+                    .then_some(rate as u32);
+            }
+        }
+    }
+    None
 }
 
 /// The project directory: `--project`, else the first directory at or above `cwd` that holds a

@@ -35,9 +35,10 @@ pub struct StartArgs {
     /// A scene to run instead of the main scene, as a res:// path
     #[arg(long)]
     pub scene: Option<String>,
-    /// The fixed frame rate, equal to the physics rate
-    #[arg(long, default_value_t = 60)]
-    pub fps: u32,
+    /// The fixed frame rate, equal to the physics rate (default: the project's physics ticks per
+    /// second, 60 when it sets none)
+    #[arg(long)]
+    pub fps: Option<u32>,
     /// No window (no screenshots)
     #[arg(long)]
     pub headless: bool,
@@ -60,12 +61,16 @@ pub struct StartArgs {
 
 #[derive(Args, Debug)]
 pub struct InputArgs {
+    /// An action of the project's input map, for example ui_accept
     #[arg(long)]
     pub action: Option<String>,
+    /// A keyboard key by its engine name, for example Space, A or Escape
     #[arg(long)]
     pub key: Option<String>,
+    /// A mouse button: left, right or middle
     #[arg(long)]
     pub button: Option<String>,
+    /// Release after this many ticks of stepping (press: held until released when omitted; tap: 2)
     #[arg(long)]
     pub ticks: Option<u64>,
 }
@@ -105,12 +110,13 @@ pub enum Verb {
     Commands,
     /// Run N physics ticks, or until an expression holds, then hold still again
     Step {
+        /// How many physics ticks to run
         ticks: Option<u64>,
         /// An expression; step until it holds
         #[arg(long)]
         until: Option<String>,
         /// Most ticks an --until step may run (default 600)
-        #[arg(long)]
+        #[arg(long, requires = "until")]
         max: Option<u64>,
     },
     /// Press an action, key or mouse button and hold it
@@ -123,32 +129,42 @@ pub enum Verb {
     ReleaseAll,
     /// Move the pointer in viewport pixels
     Pointer {
+        /// Horizontal position in viewport pixels
         #[arg(allow_negative_numbers = true)]
         x: f64,
+        /// Vertical position in viewport pixels
         #[arg(allow_negative_numbers = true)]
         y: f64,
+        /// Move by x and y instead of to them
         #[arg(long)]
         relative: bool,
     },
     /// Save the window's last drawn frame as a PNG
     Shot {
+        /// Where to save the PNG, relative to the current directory (default: shots/ in the session)
         path: Option<String>,
+        /// Scale to this many pixels across (at most 16384), keeping the proportions
         #[arg(long)]
         width: Option<u64>,
     },
     /// Evaluate an expression (root, tree, bridge and every autoload are in scope)
     Eval {
+        /// The expression; several words are joined with spaces
         #[arg(required = true, allow_hyphen_values = true)]
         expression: Vec<String>,
     },
     /// Read properties of a node
     Get {
+        /// The node, absolute (/root/Player) or relative to the root
         path: String,
+        /// The properties to read; a name may be indexed, as in position:x
         properties: Vec<String>,
     },
     /// List nodes
     Tree {
+        /// The node to start from (default /root)
         path: Option<String>,
+        /// How many levels to list (default 2)
         #[arg(long)]
         depth: Option<u64>,
         /// Add visible and process_mode
@@ -156,16 +172,27 @@ pub enum Verb {
         props: bool,
     },
     /// Read the state the project's adapter registered
-    State { names: Vec<String> },
+    State {
+        /// The state providers to read (default: all)
+        names: Vec<String>,
+    },
     /// Run a command the project's adapter registered
-    Do { name: String, json: Option<String> },
+    Do {
+        /// The name of a project command
+        name: String,
+        /// The arguments, as a JSON object (default {})
+        json: Option<String>,
+    },
     /// Send a request as written
-    Raw { json: String },
+    Raw {
+        /// The whole request, as JSON: {"cmd": "...", "args": {...}}
+        json: String,
+    },
 }
 
 fn parse_json(text: &str, what: &str) -> Result<Value> {
     serde_json::from_str(text)
-        .map_err(|error| ClientError::msg(format!("{what} is not valid JSON: {error}")))
+        .map_err(|error| ClientError::msg(format!("{what} could not be parsed as JSON: {error}")))
 }
 
 /// The `(command, args)` a verb stands for, one for one. The lifecycle verbs have no command.
@@ -218,7 +245,7 @@ pub fn command_for(verb: &Verb, ctx: &Context) -> Result<(String, Value)> {
         }
         Verb::Eval { expression } => ("eval".into(), json!({"expr": expression.join(" ")})),
         Verb::Get { path, properties } => {
-            let mut args = json!({"path": unmangle_node_path(path, ctx.msystem)});
+            let mut args = json!({"path": unmangle_node_path(path, ctx)});
             if !properties.is_empty() {
                 args["properties"] = json!(properties);
             }
@@ -227,7 +254,7 @@ pub fn command_for(verb: &Verb, ctx: &Context) -> Result<(String, Value)> {
         Verb::Tree { path, depth, props } => {
             let mut args = json!({});
             if let Some(path) = path {
-                args["path"] = json!(unmangle_node_path(path, ctx.msystem));
+                args["path"] = json!(unmangle_node_path(path, ctx));
             }
             if let Some(depth) = depth {
                 args["depth"] = json!(depth);

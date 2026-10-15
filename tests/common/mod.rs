@@ -87,27 +87,18 @@ impl Drop for FakeGame {
     }
 }
 
-use std::process::Stdio;
+use std::process::{Command, Stdio};
 use std::sync::Mutex;
 use std::time::Instant;
 
-/// The Godot executable for tests: `GODOT_CONSOLE_PATH` on Windows (it prints to a pipe),
-/// otherwise `GODOT_PATH`; a `.env` file fills in what the shell did not export.
+/// The Godot executable for tests: `GODOT_PATH`, which a `.env` file fills in when the shell did
+/// not export it.
 pub fn godot_path() -> PathBuf {
     let _ = dotenvy::dotenv();
-    let var = |name: &str| {
-        std::env::var(name)
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-    };
-    let chosen = if cfg!(windows) {
-        var("GODOT_CONSOLE_PATH").or_else(|| var("GODOT_PATH"))
-    } else {
-        var("GODOT_PATH")
-    };
-    PathBuf::from(
-        chosen.expect("set GODOT_PATH (and GODOT_CONSOLE_PATH on Windows) to run the Godot tests"),
-    )
+    let chosen = std::env::var("GODOT_PATH")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+    PathBuf::from(chosen.expect("set GODOT_PATH to run the Godot tests"))
 }
 
 pub fn project_root() -> PathBuf {
@@ -234,4 +225,60 @@ pub fn run_client(mut command: std::process::Command, deadline: Duration) -> (i3
         String::from_utf8_lossy(&out).into_owned(),
         String::from_utf8_lossy(&err).into_owned(),
     )
+}
+
+/// The built client against a real Godot running the dev project's ticker scene, in a spool of its
+/// own. Needs a Godot 4.5+ executable (see `godot_path`). Stops its session when dropped.
+pub struct Bridge {
+    pub root: tempfile::TempDir,
+    pub session: String,
+}
+
+impl Bridge {
+    pub fn new(session: &str) -> Self {
+        ensure_imported(&godot_path());
+        Self {
+            root: tempfile::tempdir().unwrap(),
+            session: session.to_string(),
+        }
+    }
+
+    pub fn command(&self, args: &[&str]) -> Command {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_godot-dev-bridge"));
+        command
+            .args(["--session", &self.session])
+            .args(args)
+            .current_dir(project_root())
+            .env("DEV_BRIDGE_ROOT", self.root.path())
+            .env("GODOT_PATH", godot_path());
+        command
+    }
+
+    /// Runs the client; returns its exit status and the JSON object it printed.
+    pub fn run(&self, args: &[&str]) -> (i32, Value) {
+        let (status, stdout, stderr) = run_client(self.command(args), Duration::from_secs(120));
+        let value = serde_json::from_str(stdout.trim())
+            .unwrap_or_else(|error| panic!("not JSON ({error}): stdout={stdout} stderr={stderr}"));
+        (status, value)
+    }
+
+    pub fn ok(&self, args: &[&str]) -> Value {
+        let (status, answer) = self.run(args);
+        assert_eq!(status, 0, "{args:?} -> {answer}");
+        answer
+    }
+
+    pub fn start(&self) -> Value {
+        self.ok(&["start", "--headless"])
+    }
+
+    pub fn ticker(&self) -> Value {
+        self.ok(&["state", "ticker"])["result"]["ticker"].clone()
+    }
+}
+
+impl Drop for Bridge {
+    fn drop(&mut self) {
+        let _ = self.command(&["stop"]).output();
+    }
 }

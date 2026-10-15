@@ -67,3 +67,37 @@ jobs:
 
       - name: GDScript unit scripts and end-to-end tests against a real Godot
         run: cargo test --test gdscript_test --test e2e_test --test installer_test --test export_test -- --ignored --test-threads=2
+
+      # The screenshot of a real window: a virtual display and Mesa's software renderers stand in
+      # for a monitor and a graphics card.
+      - name: Window screenshot on a virtual display
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb xauth libgl1 libgl1-mesa-dri libglx-mesa0 libegl1 libvulkan1 mesa-vulkan-drivers libxcursor1 libxinerama1 libxi6 libxrandr2 libxkbcommon0 libfontconfig1 libasound2t64
+          xvfb-run -a -s "-screen 0 1280x720x24" cargo test --test window_test -- --ignored
+
+  # The process-tree kill, Git Bash paths and the private spool directory only exist on Windows,
+  # so the tests that start a real game run there as well.
+  godot-windows:
+    name: Godot addon (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+
+      - name: Install Godot ${{ env.GODOT_VERSION }}
+        shell: pwsh
+        run: |
+          $version = $env:GODOT_VERSION
+          $zip = Join-Path $env:RUNNER_TEMP "godot.zip"
+          $folder = Join-Path $env:RUNNER_TEMP "godot"
+          Invoke-WebRequest -Uri "https://github.com/godotengine/godot-builds/releases/download/$version/Godot_v${version}_win64.exe.zip" -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $folder
+          "GODOT_PATH=$folder\Godot_v${version}_win64.exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: GDScript unit scripts and end-to-end tests against a real Godot
+        shell: bash
+        run: cargo test --test gdscript_test --test e2e_test --test installer_test --test export_test -- --ignored --test-threads=2

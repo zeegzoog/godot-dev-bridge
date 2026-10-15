@@ -53,5 +53,16 @@ func _initialize() -> void:
     check.equal(injector.pointer({"x": 10, "y": 20})["position"], [10.0, 20.0], "the pointer moves to a position")
     check.equal(injector.pointer({"x": 5, "y": 5, "relative": true})["position"], [15.0, 25.0], "or by an amount")
 
+    check.is_true(injector.pointer({"x": 1.0e308, "y": 0}).has("error"), "a position that does not fit a float is refused")
+    injector.pointer({"x": 3.0e38, "y": 0})
+    check.is_true(injector.pointer({"x": 3.0e38, "y": 0, "relative": true}).has("error"), "a move that overflows is refused")
+    check.equal(injector.pointer({"x": 1, "y": 1})["position"], [1.0, 1.0], "and the pointer was not left at infinity")
+
+    injector.press({"key": "space"}, 0)
+    injector.press({"key": "Space"}, 0)
+    check.equal(injector.held(), ["key:Space"], "one key is one entry, whatever its spelling")
+    injector.release({"key": "space"})
+    check.equal(injector.held(), [], "and one release lets it go")
+
     InputMap.erase_action(TEST_ACTION)
     check.finish(self, "input_injector_test")

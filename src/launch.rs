@@ -1,7 +1,7 @@
 //! Starting the game with the bridge enabled and stopping it again.
 
 use crate::cli::StartArgs;
-use crate::config::{Context, find_project, resolve_godot};
+use crate::config::{Context, find_project, project_physics_rate, resolve_godot};
 use crate::error::{ClientError, Result};
 use crate::process;
 use crate::session::{
@@ -19,6 +19,20 @@ pub const PROTOCOL: u64 = 1;
 
 const POLL: Duration = Duration::from_millis(10);
 const STOP_GRACE: Duration = Duration::from_secs(5);
+
+/// The engine's default physics tick rate, for a project that does not set one.
+const DEFAULT_FPS: u32 = 60;
+
+/// The fixed frame rate: `--fps`, else the physics rate the project sets, else 60. Stepping is exact
+/// only when it equals the physics rate, so a project that sets its own would otherwise start in a
+/// state that is not deterministic.
+pub fn effective_fps(project: &Path, args: &StartArgs) -> Result<u32> {
+    match args.fps {
+        Some(0) => Err(ClientError::msg("--fps must be a positive number")),
+        Some(fps) => Ok(fps),
+        None => Ok(project_physics_rate(project).unwrap_or(DEFAULT_FPS)),
+    }
+}
 
 fn parse_window(window: &str) -> bool {
     match window.split_once('x') {
@@ -40,9 +54,7 @@ pub fn build_godot_command(
     directory: &Path,
     args: &StartArgs,
 ) -> Result<Vec<String>> {
-    if args.fps == 0 {
-        return Err(ClientError::msg("--fps must be a positive number"));
-    }
+    let fps = effective_fps(project, args)?;
     if !args.headless && !parse_window(&args.window) {
         return Err(ClientError::msg(format!(
             "--window must look like 1152x648, got '{}'",
@@ -62,7 +74,7 @@ pub fn build_godot_command(
         "--path".into(),
         project.to_string_lossy().into_owned(),
         "--fixed-fps".into(),
-        args.fps.to_string(),
+        fps.to_string(),
     ];
     if args.headless {
         command.push("--headless".into());
@@ -82,7 +94,7 @@ pub fn build_godot_command(
     }
     command.push("--".into());
     command.push(format!("--bridge-dir={}", directory.to_string_lossy()));
-    command.push(format!("--bridge-fixed-fps={}", args.fps));
+    command.push(format!("--bridge-fixed-fps={fps}"));
     if let Some(seconds) = args.idle_quit {
         command.push(format!("--bridge-idle-quit={seconds}"));
     }
@@ -243,12 +255,13 @@ pub fn start_session(
         return Err(ClientError::msg(problem));
     }
 
+    // Validated before anything is cleared: a typo must not cost the previous run's log.
     let directory = session_directory(&ctx.root, &name);
+    let command = build_godot_command(&godot, &project, &directory, args)?;
     ensure_private_dir(&ctx.root)?;
     ensure_private_dir(&directory)?;
     clear_directory(&directory);
 
-    let command = build_godot_command(&godot, &project, &directory, args)?;
     let mut child = spawn_game(&command, &log_path(&directory))?;
     let pid = child.id();
     let started = SystemTime::now()

@@ -83,13 +83,14 @@ func pointer(args: Dictionary) -> Dictionary:
     ):
         return {"error": "`x` and `y` must be numbers."}
     var given := Vector2(float(args.x), float(args.y))
+    # A position that does not fit a float (or is not a number) would be answered as `inf`, which is
+    # not JSON, and would leave the pointer there for good.
+    var target: Vector2 = (_pointer + given) if args.get("relative", false) else given
+    if not (is_finite(given.x) and is_finite(given.y) and is_finite(target.x) and is_finite(target.y)):
+        return {"error": "`x` and `y` must be finite numbers that fit a position."}
     var event := InputEventMouseMotion.new()
-    if args.get("relative", false):
-        event.relative = given
-        _pointer += given
-    else:
-        event.relative = given - _pointer
-        _pointer = given
+    event.relative = target - _pointer
+    _pointer = target
     event.position = _pointer
     event.global_position = _pointer
     event.button_mask = _button_mask
@@ -114,8 +115,11 @@ func _resolve(args: Dictionary) -> Dictionary:
             if not InputMap.has_action(name):
                 return {"error": "No action named '%s'." % name}
         "key":
-            if OS.find_keycode_from_string(name) == KEY_NONE:
+            var code := OS.find_keycode_from_string(name)
+            if code == KEY_NONE:
                 return {"error": "No key named '%s'." % name}
+            # One key has one name (`space` is `Space`), so that it is held, and released, once.
+            name = OS.get_keycode_string(code)
         "button":
             if not BUTTONS.has(name):
                 return {"error": "No mouse button named '%s' (left, right, middle)." % name}

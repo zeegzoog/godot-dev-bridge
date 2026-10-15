@@ -19,6 +19,12 @@ func _initialize() -> void:
     check.is_true(observer.evaluate("1 +").has("error"), "a parse error is reported")
     check.is_true(observer.evaluate("nope.method()").has("error"), "a runtime failure is reported")
 
+    check.equal(observer.evaluate("bridge.marker + 1"), {"value": 8}, "an expression is evaluated again")
+    check.equal(observer.evaluate("bridge.marker + 1"), {"value": 8}, "and a repeated one gives the same answer")
+    check.is_true(observer.evaluate("1 +").has("error"), "a bad expression after a good one is still an error")
+    check.equal(observer.evaluate("2 + 2"), {"value": 4}, "and a good one after a bad one still works")
+    check.equal(observer.evaluate("bridge.marker"), {"value": 7}, "a different expression is not served from the last parse")
+
     check.equal(Observer.to_json(5), 5, "an int stays")
     check.equal(Observer.to_json("a"), "a", "a string stays")
     check.equal(Observer.to_json(Vector2(1, 2)), [1.0, 2.0], "a Vector2 is its components")
@@ -40,6 +46,18 @@ func _initialize() -> void:
     var converted: Variant = Observer.to_json(object)
     check.is_true(converted is Dictionary and converted["class"] == "RefCounted", "another object is {class, id}")
     check.is_true(Observer.to_json(Callable()) is String, "anything else is its var_to_str text")
+
+    var cyclic := []
+    cyclic.append(cyclic)
+    var cut: Variant = Observer.to_json(cyclic)
+    check.is_true(cut is Array and JSON.stringify(cut).length() < 4000, "a value that contains itself is cut off instead of overflowing the stack")
+    var cyclic_members := {}
+    cyclic_members["me"] = cyclic_members
+    check.is_true(JSON.stringify(Observer.to_json(cyclic_members)).length() < 4000, "and so is a dictionary that contains itself")
+    var nested: Array = [1]
+    for level in Observer.MAX_DEPTH - 2:
+        nested = [nested]
+    check.is_true(JSON.stringify(Observer.to_json(nested)).find("nested too deeply") == -1, "ordinary nesting is converted whole")
 
     check.is_true(observer.node_at("/root") == root, "an absolute path finds the root")
     check.is_true(observer.node_at("/root/Nope") == null, "a missing path is null")

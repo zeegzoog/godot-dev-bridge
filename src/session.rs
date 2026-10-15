@@ -98,7 +98,30 @@ pub fn ensure_private_dir(path: &Path) -> Result<()> {
     Ok(())
 }
 
-#[cfg(not(unix))]
+/// On Windows a new directory inherits the access rules of its parent, and a temporary directory
+/// can grant other accounts write access. The directory is made private by replacing its rules with
+/// ones for this user and the system alone (no inheritance), and one that is a link, or is owned by
+/// somebody else, is refused: see `winsec`.
+#[cfg(windows)]
+pub fn ensure_private_dir(path: &Path) -> Result<()> {
+    std::fs::create_dir_all(path)?;
+    let meta = std::fs::symlink_metadata(path)?;
+    if meta.file_type().is_symlink() {
+        return Err(ClientError::msg(format!(
+            "{} is a link (a symbolic link or a junction); refusing to use it as a session directory",
+            path.display()
+        )));
+    }
+    if !meta.is_dir() {
+        return Err(ClientError::msg(format!(
+            "{} is not a directory",
+            path.display()
+        )));
+    }
+    crate::winsec::make_private(path)
+}
+
+#[cfg(not(any(unix, windows)))]
 pub fn ensure_private_dir(path: &Path) -> Result<()> {
     std::fs::create_dir_all(path)?;
     Ok(())
@@ -114,10 +137,18 @@ pub fn game_alive(record: &SessionRecord) -> bool {
 pub fn require_live(root: &Path, name: &str) -> Result<(PathBuf, SessionRecord)> {
     let directory = session_directory(root, name);
     let Some(record) = read_record(&directory) else {
-        return Err(ClientError::msg(format!(
-            "no session named '{name}' (looked in {})",
-            directory.display()
-        )));
+        let record_path = directory.join("session.json");
+        return Err(ClientError::msg(if record_path.exists() {
+            format!(
+                "{} is unreadable; delete the directory, or start the session again",
+                record_path.display()
+            )
+        } else {
+            format!(
+                "no session named '{name}' (looked in {})",
+                directory.display()
+            )
+        }));
     };
     if !game_alive(&record) {
         return Err(ClientError::msg(format!(
@@ -150,21 +181,35 @@ pub fn list(root: &Path) -> Vec<Value> {
         .collect()
 }
 
-/// Removes what a finished session left, so a new one starts clean (the old log goes too).
-pub fn clear_directory(directory: &Path) {
+/// Removes a link itself (a symbolic link or, on Windows, a junction), never what it points to.
+fn remove_link(path: &Path) {
+    if std::fs::remove_file(path).is_err() {
+        let _ = std::fs::remove_dir(path);
+    }
+}
+
+fn clear_contents(directory: &Path) {
     let Ok(entries) = std::fs::read_dir(directory) else {
         return;
     };
     for entry in entries.filter_map(|entry| entry.ok()) {
         let path = entry.path();
-        if path.is_file() {
+        // `DirEntry::file_type` does not follow links: what a link points to is not ours to delete.
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        if kind.is_symlink() {
+            remove_link(&path);
+        } else if kind.is_dir() {
+            clear_contents(&path);
+        } else {
             let _ = std::fs::remove_file(&path);
-        } else if path.is_dir() {
-            if let Ok(inner) = std::fs::read_dir(&path) {
-                for file in inner.filter_map(|file| file.ok()) {
-                    let _ = std::fs::remove_file(file.path());
-                }
-            }
         }
     }
+}
+
+/// Removes what a finished session left, so a new one starts clean (the old log goes too). The
+/// directories inside stay, emptied; links are removed, never followed.
+pub fn clear_directory(directory: &Path) {
+    clear_contents(directory);
 }

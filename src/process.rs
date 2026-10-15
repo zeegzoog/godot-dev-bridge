@@ -137,8 +137,8 @@ pub fn started_at(pid: u32) -> Option<f64> {
     }
 }
 
-/// Ends the process and everything it started: Godot's console wrapper (`GODOT_CONSOLE_PATH`) runs
-/// the engine as a child, and killing the wrapper alone would leave the game running.
+/// Ends the process and everything it started: a wrapper executable (Godot's console build is one)
+/// runs the engine as a child, and killing the wrapper alone would leave the game running.
 #[cfg(windows)]
 pub fn kill(pid: u32) {
     use std::process::{Command, Stdio};
@@ -169,7 +169,7 @@ mod tests {
         assert!(!is_alive(u32::MAX - 1));
     }
 
-    /// Godot's console wrapper starts the engine as a child, so ending a game means ending a tree.
+    /// A wrapper executable starts the engine as a child, so ending a game means ending a tree.
     #[cfg(windows)]
     #[test]
     fn killing_a_process_also_ends_its_children() {

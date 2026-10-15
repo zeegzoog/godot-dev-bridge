@@ -21,8 +21,22 @@ const SEQUENCE_TYPES := [
     TYPE_PACKED_VECTOR4_ARRAY,
 ]
 
+## How deep `to_json` follows nested arrays and dictionaries before it gives up: a value that
+## contains itself would otherwise never end, and its answer would not be valid JSON.
+const MAX_DEPTH: int = 64
+
 var _tree: SceneTree
 var _bridge: Variant
+
+## The names of the project's autoloads. They are fixed once the game runs, so they are listed once.
+var _autoloads: Array[String] = []
+var _autoloads_listed: bool = false
+
+## The last expression that parsed, kept so that a condition asked every tick of a step is parsed
+## once. It is valid for the same text and the same names (and so the same order of values).
+var _parsed: Expression = null
+var _parsed_text: String = ""
+var _parsed_names: String = ""
 
 func _init(scene_tree: SceneTree, bridge_object: Variant) -> void:
     _tree = scene_tree
@@ -40,32 +54,43 @@ func evaluate(text: String) -> Dictionary:
             names.append(autoload_name)
             values.append(node)
 
-    var expression := Expression.new()
-    if expression.parse(text, names) != OK:
-        return {"error": expression.get_error_text()}
-    var value: Variant = expression.execute(values, _tree.root, false)
-    if expression.has_execute_failed():
-        return {"error": expression.get_error_text()}
+    var signature := ",".join(names)
+    if _parsed == null or _parsed_text != text or _parsed_names != signature:
+        var expression := Expression.new()
+        if expression.parse(text, names) != OK:
+            return {"error": expression.get_error_text()}
+        _parsed = expression
+        _parsed_text = text
+        _parsed_names = signature
+    var value: Variant = _parsed.execute(values, _tree.root, false)
+    if _parsed.has_execute_failed():
+        return {"error": _parsed.get_error_text()}
     return {"value": value}
 
-## The names of the project's autoloads.
+## The names of the project's autoloads. Walking every project setting costs milliseconds, and a
+## condition is evaluated on every tick of a step, so it is done once.
 func _autoload_names() -> Array[String]:
-    var found: Array[String] = []
+    if _autoloads_listed:
+        return _autoloads
     for property in ProjectSettings.get_property_list():
         var name: String = property.name
         if name.begins_with("autoload/"):
-            found.append(name.trim_prefix("autoload/"))
-    return found
+            _autoloads.append(name.trim_prefix("autoload/"))
+    _autoloads_listed = true
+    return _autoloads
 
 ## `value` as something JSON can hold: scalars as they are; arrays, packed arrays and dictionaries
 ## element by element; vectors, quaternions, colours (`[r, g, b, a]`) and rectangles as arrays of
 ## components; a transform as `{origin, basis: [x, y, z]}`; a node as its absolute path; any other
-## object as `{class, id}`; and anything else as its `var_to_str` text.
-static func to_json(value: Variant) -> Variant:
+## object as `{class, id}`; and anything else as its `var_to_str` text. Nesting deeper than
+## `MAX_DEPTH` is replaced by a marker text.
+static func to_json(value: Variant, depth: int = 0) -> Variant:
+    if depth > MAX_DEPTH:
+        return "<nested too deeply>"
     if typeof(value) in SEQUENCE_TYPES:
         var elements := []
         for element in value:
-            elements.append(to_json(element))
+            elements.append(to_json(element, depth + 1))
         return elements
     match typeof(value):
         TYPE_NIL, TYPE_BOOL, TYPE_INT, TYPE_STRING:
@@ -86,13 +111,17 @@ static func to_json(value: Variant) -> Variant:
             return [value.position.x, value.position.y, value.size.x, value.size.y]
         TYPE_TRANSFORM3D:
             return {
-                "origin": to_json(value.origin),
-                "basis": [to_json(value.basis.x), to_json(value.basis.y), to_json(value.basis.z)],
+                "origin": to_json(value.origin, depth + 1),
+                "basis": [
+                    to_json(value.basis.x, depth + 1),
+                    to_json(value.basis.y, depth + 1),
+                    to_json(value.basis.z, depth + 1),
+                ],
             }
         TYPE_DICTIONARY:
             var members := {}
             for key in value:
-                members[str(key)] = to_json(value[key])
+                members[str(key)] = to_json(value[key], depth + 1)
             return members
         TYPE_OBJECT:
             if not is_instance_valid(value):

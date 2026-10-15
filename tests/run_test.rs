@@ -152,13 +152,53 @@ fn a_non_positive_timeout_is_a_usage_error() {
 }
 
 #[test]
-fn unknown_verbs_are_status_two_and_clap_prints_the_usage() {
+fn usage_errors_are_status_two_with_the_usual_client_error_object() {
     let dir = tempfile::tempdir().unwrap();
-    let (status, output) = run(
-        vec!["godot-dev-bridge".into(), "nonsense".into()],
-        &context(dir.path()),
-    );
-    assert_eq!((status, output), (2, None));
+    for (words, expected) in [
+        (vec!["nonsense"], "unrecognized subcommand 'nonsense'"),
+        (vec![], "no command given"),
+        (vec!["step", "3", "--max", "1"], "--until"),
+        (vec!["eval"], "required arguments"),
+    ] {
+        let mut argv = vec!["godot-dev-bridge".to_string()];
+        argv.extend(words.iter().map(|word| word.to_string()));
+        let (status, output) = run(argv, &context(dir.path()));
+        assert_eq!(status, 2, "{words:?}");
+        let output = output.unwrap_or_else(|| panic!("{words:?} printed no JSON object"));
+        assert_eq!(output["ok"], false, "{words:?}");
+        assert_eq!(output["error"]["code"], "client", "{words:?}");
+        let message = output["error"]["message"].as_str().unwrap();
+        assert!(message.contains(expected), "{words:?}: {message}");
+        assert!(message.contains("--help"), "{words:?}: {message}");
+    }
+}
+
+#[test]
+fn help_and_version_are_a_success_with_no_json_object() {
+    let dir = tempfile::tempdir().unwrap();
+    for flag in ["--help", "--version"] {
+        let (status, output) = run(
+            vec!["godot-dev-bridge".into(), flag.into()],
+            &context(dir.path()),
+        );
+        assert_eq!((status, output), (0, None), "{flag}");
+    }
+}
+
+#[test]
+fn a_timeout_that_does_not_fit_a_clock_is_a_usage_error_not_a_panic() {
+    let dir = tempfile::tempdir().unwrap();
+    for seconds in ["1e30", "1e300", "40000000"] {
+        let (status, answer) = drive(&context(dir.path()), &["--timeout", seconds, "ping"]);
+        assert_eq!(status, 2, "{seconds}");
+        assert!(
+            answer["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("at most"),
+            "{seconds}: {answer}"
+        );
+    }
 }
 
 #[test]

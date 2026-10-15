@@ -62,6 +62,50 @@ fn a_headless_command_line_has_the_engine_arguments_then_the_separator_then_ours
 }
 
 #[test]
+fn the_frame_rate_defaults_to_the_projects_physics_rate_and_the_flag_wins() {
+    let project = tempfile::tempdir().unwrap();
+    let command = |extra: &[&str]| {
+        build_godot_command(
+            Path::new("godot"),
+            project.path(),
+            Path::new("spool"),
+            &start_args(extra),
+        )
+        .unwrap()
+    };
+    let rate = |command: &[String]| {
+        let at = command
+            .iter()
+            .position(|word| word == "--fixed-fps")
+            .unwrap();
+        (
+            command[at + 1].clone(),
+            command
+                .iter()
+                .find_map(|word| word.strip_prefix("--bridge-fixed-fps="))
+                .unwrap()
+                .to_string(),
+        )
+    };
+
+    assert_eq!(rate(&command(&["--headless"])), ("60".into(), "60".into()));
+    std::fs::write(
+        project.path().join("project.godot"),
+        "[physics]\n\ncommon/physics_ticks_per_second=120\n",
+    )
+    .unwrap();
+    assert_eq!(
+        rate(&command(&["--headless"])),
+        ("120".into(), "120".into())
+    );
+    assert_eq!(
+        rate(&command(&["--headless", "--fps", "30"])),
+        ("30".into(), "30".into()),
+        "an explicit rate is used as given, and `status` then says it is not deterministic"
+    );
+}
+
+#[test]
 fn a_windowed_command_line_carries_every_option_in_order() {
     let command = build_godot_command(
         Path::new("godot"),

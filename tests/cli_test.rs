@@ -162,7 +162,7 @@ fn start_has_defaults_and_collects_engine_arguments_after_the_separator() {
     let Verb::Start(start) = parse(&["start"]).verb else {
         panic!("not start")
     };
-    assert_eq!(start.fps, 60);
+    assert_eq!(start.fps, None, "the default comes from the project");
     assert_eq!(start.window, "1152x648");
     assert!(!start.headless && !start.fast && !start.keep_mouse);
     assert!(start.engine_args.is_empty());
@@ -185,6 +185,14 @@ fn start_has_defaults_and_collects_engine_arguments_after_the_separator() {
     assert_eq!(start.scene.as_deref(), Some("res://a.tscn"));
     assert_eq!(start.idle_quit, Some(120));
     assert_eq!(start.engine_args, vec!["--verbose".to_string()]);
+}
+
+#[test]
+fn a_step_limit_needs_an_expression_to_limit() {
+    assert!(Cli::try_parse_from(["godot-dev-bridge", "step", "3", "--max", "1"]).is_err());
+    assert!(
+        Cli::try_parse_from(["godot-dev-bridge", "step", "--until", "x", "--max", "1"]).is_ok()
+    );
 }
 
 #[test]

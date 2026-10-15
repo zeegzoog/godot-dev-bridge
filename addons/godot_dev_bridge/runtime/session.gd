@@ -24,6 +24,9 @@ const FIXED_FPS_ARGUMENT := "--bridge-fixed-fps="
 ## How many answered request ids are remembered, for diagnostics and tests.
 const SERVED_LOG_LIMIT: int = 64
 
+## The widest screenshot a `shot` may be scaled to: the engine's largest image side.
+const MAX_SHOT_WIDTH: int = 16384
+
 ## How long a parked session sleeps between looks at the spool directory.
 const POLL_MILLISECONDS: int = 2
 
@@ -52,6 +55,7 @@ var _pending_step: Dictionary = {}  # {entry, id, until} while a step runs, else
 var _last_activity_msec: int = 0
 var _frames_at_step_start: int = 0
 var _adapter: Variant = null
+var _adapter_state: Dictionary = {"configured": false}
 var _unpaired_reason: String = ""
 
 func _init(directory: String, quit: Callable, options: Dictionary = {}) -> void:
@@ -70,20 +74,31 @@ func start() -> void:
 
 ## Loads the project adapter named by the project setting, if there is one, and lets it register
 ## what the game can show and do. No setting leaves the session generic; a script that cannot be
-## loaded is reported and leaves it generic too.
+## loaded is reported and leaves it generic too. What happened is in `ready.json` and `status`
+## (`adapter`), so a driver does not have to read the game's log to find out.
 func _load_adapter() -> void:
     var path := str(_options.get("adapter", ""))
     if path.is_empty():
         return
+    _adapter_state = {"configured": true, "path": path, "loaded": false}
     var script: Variant = load(path) if ResourceLoader.exists(path) else null
-    if not script is GDScript:
+    if not script is GDScript or not (script as GDScript).can_instantiate():
+        _adapter_state["error"] = "the script cannot be loaded (see the game's log)"
         push_warning("godot_dev_bridge: the adapter '%s' cannot be loaded" % path)
         return
     _adapter = script.new()
     if _adapter.has_method("register"):
         _adapter.register(registry)
+        _adapter_state["loaded"] = true
     else:
+        _adapter_state["error"] = "the script has no register(registry) method"
         push_warning("godot_dev_bridge: the adapter '%s' has no register(registry)" % path)
+
+## An adapter that extends `Node` is not in the tree, so nothing else would free it.
+func _release_adapter() -> void:
+    if _adapter is Node and is_instance_valid(_adapter) and not (_adapter as Node).is_inside_tree():
+        (_adapter as Node).free()
+    _adapter = null
 
 ## What `ready.json` holds: who the game is and how it was started.
 func ready_info() -> Dictionary:
@@ -102,6 +117,7 @@ func ready_info() -> Dictionary:
         "deterministic": determinism.deterministic,
         "physics_ticks_per_second": Engine.physics_ticks_per_second,
         "window_size": _window_size(),
+        "adapter": _adapter_state,
     }
     if not determinism.deterministic:
         info["reason"] = determinism.reason
@@ -262,13 +278,18 @@ func _serve(entry: Dictionary) -> void:
         return
 
     _transport.respond(entry, id, _response(id, outcome))
-    served_ids.append(id)
-    if served_ids.size() > SERVED_LOG_LIMIT:
-        served_ids.pop_front()
+    _remember(id)
     if _quitting:
         _transport.write_json("closed.json", {"reason": "quit"})
+        _release_adapter()
         if _quit.is_valid():
             _quit.call()
+
+## Remembers an answered request id, keeping only the most recent `SERVED_LOG_LIMIT`.
+func _remember(id: String) -> void:
+    served_ids.append(id)
+    while served_ids.size() > SERVED_LOG_LIMIT:
+        served_ids.pop_front()
 
 ## Runs the command and turns anything that is not a dictionary (a handler that failed inside its own
 ## script returns null) into an `internal` error, so the driver always gets an answer.
@@ -346,7 +367,7 @@ func _pointer(args: Dictionary) -> Dictionary:
 func _input_outcome(outcome: Dictionary) -> Dictionary:
     if outcome.has("error"):
         return _error("bad_args", outcome.error)
-    return {"result": outcome}
+    return {"result": OBSERVER.to_json(outcome)}
 
 ## `state`: the values of the registered providers (`{names?}` for some), converted for JSON; a
 ## provider that fails answers `{error}` for itself only.
@@ -401,11 +422,11 @@ func _tree_listing(args: Dictionary) -> Dictionary:
 
 ## `shot`: the main window's last frame as a PNG, to `{path}` or to `shots/` in the session
 ## directory, scaled to `{width}` pixels across when that is given. A session with no window answers
-## `no_renderer`.
+## `no_renderer`, and a `{path}` that cannot be written `bad_args`.
 func _shot(args: Dictionary) -> Dictionary:
     var width: Variant = args.get("width", 0)
-    if not _is_whole_number(width) or int(width) < 0:
-        return _error("bad_args", "`width` must be a non-negative integer.")
+    if not _is_whole_number(width) or int(width) < 0 or int(width) > MAX_SHOT_WIDTH:
+        return _error("bad_args", "`width` must be an integer from 0 to %d." % MAX_SHOT_WIDTH)
     var path: Variant = args.get("path", "")
     if not path is String:
         return _error("bad_args", "`path` must be a file path.")
@@ -417,7 +438,9 @@ func _shot(args: Dictionary) -> Dictionary:
         target = _transport.directory.path_join("shots/shot-%d.png" % Engine.get_physics_frames())
     var saved: Dictionary = OBSERVER.save_png(image, target, int(width))
     if saved.has("error"):
-        return _error("internal", saved.error)
+        # A path the driver named that cannot be written is the driver's to fix; the session's own
+        # `shots/` directory failing is not.
+        return _error("bad_args" if not (path as String).is_empty() else "internal", saved.error)
     return {"result": saved}
 
 ## `step`: `{ticks}` runs exactly that many ticks; `{until, max_ticks?}` runs until the expression
@@ -483,7 +506,7 @@ func _complete_pending_step() -> void:
     _verify_pairing()
     var response := _response(pending.id, {"result": _step_result(pending.until)})
     _transport.write_json("resp-%s.json" % pending.id, response)
-    served_ids.append(pending.id)
+    _remember(pending.id)
 
 ## A finished step must have advanced the process frames by exactly its ticks; if not, the frame
 ## rate is not fixed after all and the session says so from now on.
@@ -509,6 +532,7 @@ func _end(reason: String) -> void:
     _quitting = true
     _input.release_all()
     _transport.write_json("closed.json", {"reason": reason})
+    _release_adapter()
     if _quit.is_valid():
         _quit.call()
 

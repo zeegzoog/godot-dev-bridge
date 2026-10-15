@@ -1,5 +1,6 @@
 use godot_dev_bridge::config::{
-    Context, GodotEnv, absolutize, default_root, find_project, resolve_godot, validate_session_name,
+    Context, GodotEnv, absolutize, default_root, find_project, project_physics_rate, resolve_godot,
+    validate_session_name,
 };
 use std::path::Path;
 
@@ -35,7 +36,6 @@ fn godot_is_taken_from_the_flag_then_the_environment_in_order() {
         godot_env: GodotEnv {
             godot_path: Some(path.to_string_lossy().into()),
             godot: Some(plain.to_string_lossy().into()),
-            console_path: None,
         },
         ..Context::default()
     };
@@ -49,7 +49,6 @@ fn godot_is_taken_from_the_flag_then_the_environment_in_order() {
         godot_env: GodotEnv {
             godot_path: Some("/missing".into()),
             godot: Some(plain.to_string_lossy().into()),
-            console_path: None,
         },
         ..Context::default()
     };
@@ -57,29 +56,39 @@ fn godot_is_taken_from_the_flag_then_the_environment_in_order() {
 }
 
 #[test]
-fn the_console_wrapper_is_preferred_only_on_windows() {
+fn the_physics_rate_comes_from_the_physics_section_of_the_project() {
     let dir = tempfile::tempdir().unwrap();
-    let console = dir.path().join("console-godot");
-    let gui = dir.path().join("gui-godot");
-    touch(&console);
-    touch(&gui);
-    let env = GodotEnv {
-        godot_path: Some(gui.to_string_lossy().into()),
-        godot: None,
-        console_path: Some(console.to_string_lossy().into()),
-    };
-    let windows = Context {
-        godot_env: env.clone(),
-        windows: true,
-        ..Context::default()
-    };
-    let other = Context {
-        godot_env: env,
-        windows: false,
-        ..Context::default()
-    };
-    assert_eq!(resolve_godot(&windows, None).unwrap(), console);
-    assert_eq!(resolve_godot(&other, None).unwrap(), gui);
+    assert_eq!(project_physics_rate(dir.path()), None, "no project.godot");
+    let write = |text: &str| std::fs::write(dir.path().join("project.godot"), text).unwrap();
+
+    write("config_version=5\n\n[application]\n\nconfig/name=\"x\"\n");
+    assert_eq!(
+        project_physics_rate(dir.path()),
+        None,
+        "a project that sets none"
+    );
+    write("[physics]\n\ncommon/physics_ticks_per_second=120\n\n[rendering]\n");
+    assert_eq!(project_physics_rate(dir.path()), Some(120));
+    write("[physics]\n\ncommon/physics_jitter_fix=0.0\ncommon/physics_ticks_per_second = 30\n");
+    assert_eq!(
+        project_physics_rate(dir.path()),
+        None,
+        "only the exact `key=value` form is read"
+    );
+    write("[physics]\n\ncommon/physics_ticks_per_second=30\n");
+    assert_eq!(project_physics_rate(dir.path()), Some(30));
+    write("[display]\n\ncommon/physics_ticks_per_second=90\n");
+    assert_eq!(
+        project_physics_rate(dir.path()),
+        None,
+        "the key of another section is not it"
+    );
+    for bad in ["0", "-5", "abc", "12.5", "99999999999"] {
+        write(&format!(
+            "[physics]\n\ncommon/physics_ticks_per_second={bad}\n"
+        ));
+        assert_eq!(project_physics_rate(dir.path()), None, "{bad}");
+    }
 }
 
 #[test]

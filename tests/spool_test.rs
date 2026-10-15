@@ -2,7 +2,7 @@ mod common;
 
 use common::{FakeGame, fail, ok};
 use godot_dev_bridge::spool::{
-    Wait, new_request_id, read_json, send_request, write_json_atomically,
+    Wait, new_request_id, read_json, send_request, sweep_stale_answers, write_json_atomically,
 };
 use serde_json::json;
 use std::time::Duration;
@@ -91,4 +91,98 @@ fn a_dead_game_ends_the_wait_early_and_the_note_is_appended() {
         "{text}"
     );
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn a_timeout_after_the_game_took_the_request_says_it_may_still_be_running() {
+    let dir = tempfile::tempdir().unwrap();
+    let directory = dir.path().to_path_buf();
+    // A game that takes the request, as a running step does, and never answers in time.
+    let taker = std::thread::spawn(move || {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            for entry in std::fs::read_dir(&directory).unwrap().flatten() {
+                if entry.file_name().to_string_lossy().starts_with("cmd-")
+                    && !entry.file_name().to_string_lossy().ends_with(".tmp")
+                {
+                    std::fs::remove_file(entry.path()).unwrap();
+                    return;
+                }
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    });
+    let error = send_request(dir.path(), "step", &json!({"ticks": 600}), &wait(0.5))
+        .unwrap_err()
+        .to_string();
+    taker.join().unwrap();
+    assert!(
+        error.contains("took the request") && error.contains("status"),
+        "{error}"
+    );
+}
+
+#[test]
+fn answers_nobody_collected_are_swept_but_fresh_ones_stay() {
+    let dir = tempfile::tempdir().unwrap();
+    let old = dir.path().join("resp-old.json");
+    let fresh = dir.path().join("resp-fresh.json");
+    let other = dir.path().join("game.log");
+    for path in [&old, &fresh, &other] {
+        std::fs::write(path, "{}").unwrap();
+    }
+    let long_ago = std::time::SystemTime::now() - Duration::from_secs(3600);
+    std::fs::File::options()
+        .write(true)
+        .open(&old)
+        .unwrap()
+        .set_modified(long_ago)
+        .unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&other)
+        .unwrap()
+        .set_modified(long_ago)
+        .unwrap();
+
+    sweep_stale_answers(dir.path(), Duration::from_secs(60));
+
+    assert!(!old.exists(), "an old answer is an orphan");
+    assert!(fresh.exists(), "a fresh answer may still be wanted");
+    assert!(other.exists(), "only answers are swept");
+}
+
+#[test]
+fn an_answer_that_is_not_json_is_named_and_removed() {
+    let dir = tempfile::tempdir().unwrap();
+    let directory = dir.path().to_path_buf();
+    let writer = std::thread::spawn(move || {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            for entry in std::fs::read_dir(&directory).unwrap().flatten() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                if name.starts_with("cmd-") && !name.ends_with(".tmp") {
+                    let id = name.rsplit('-').next().unwrap().trim_end_matches(".json");
+                    std::fs::write(
+                        directory.join(format!("resp-{id}.json")),
+                        "{\"value\": 1e99999}",
+                    )
+                    .unwrap();
+                    std::fs::remove_file(entry.path()).unwrap();
+                    return;
+                }
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    });
+    let error = send_request(dir.path(), "eval", &json!({"expr": "x"}), &wait(5.0))
+        .unwrap_err()
+        .to_string();
+    writer.join().unwrap();
+    assert!(
+        error.contains("not valid JSON") && error.contains("resp-"),
+        "{error}"
+    );
+    let leftovers: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
+    assert!(leftovers.is_empty(), "left behind: {leftovers:?}");
 }

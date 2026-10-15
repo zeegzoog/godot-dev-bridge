@@ -158,12 +158,47 @@ func _initialize() -> void:
     session._complete_pending_step()
     check.equal(_ask(session, "i6", "status").result.held_inputs, [], "the second one-tick step releases it")
 
+    var failed_pointer := _ask(session, "pt1", "pointer", {"x": 1.0e308, "y": 0})
+    check.equal(failed_pointer.ok, false, "a pointer position that is not finite is refused")
+    check.equal(failed_pointer.error.code, "bad_args", "as bad arguments")
+    var wide_shot := _ask(session, "sw1", "shot", {"width": 100000})
+    check.equal(wide_shot.error.code, "bad_args", "a screenshot wider than the engine allows is refused")
+    var status_now: Dictionary = _ask(session, "st1", "status").result
+    check.equal(status_now.adapter, {"configured": false}, "a session with no adapter says so")
+
+    # The memory of answered ids is bounded for every kind of answer, deferred steps included.
+    for index in Session.SERVED_LOG_LIMIT + 20:
+        _ask(session, "m%d" % index, "ping", {}, 100 + index)
+        _ask(session, "n%d" % index, "step", {"ticks": 1}, 1000 + index)
+        session._complete_pending_step()
+    check.equal(session.served_ids.size(), Session.SERVED_LOG_LIMIT, "only the most recent answers are remembered")
+
     var quit_answer := _ask(session, "q1", "quit")
     check.equal(quit_answer.result, {"quitting": true}, "quit is answered")
     check.is_true(session.is_quitting(), "the session knows it is ending")
     check.equal(made.quits.count, 1, "the quit action ran")
     var closed: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(_directory.path_join("closed.json")))
     check.equal(closed, {"reason": "quit"}, "closed.json says why")
+
+    # The driver can tell from `ready.json` what became of the project adapter.
+    var adapter_cases := {
+        "res://tests/fixtures/adapter.gd": {"loaded": true},
+        "res://tests/fixtures/no_such_adapter.gd": {"loaded": false},
+        "res://tests/fixtures/ticker.gd": {"loaded": false},
+    }
+    for path: String in adapter_cases:
+        _clean()
+        var quits := {"count": 0}
+        var quit := func() -> void: quits.count += 1
+        var options := {"arguments": PackedStringArray(), "tree": self, "adapter": path}
+        var adapter_session: Variant = Session.new(_directory, quit, options)
+        adapter_session.start()
+        var info: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(_directory.path_join("ready.json"))).adapter
+        check.equal(info.path, path, "ready.json names the adapter %s" % path)
+        check.equal(info.loaded, adapter_cases[path].loaded, "and whether it registered")
+        check.equal(info.has("error"), not adapter_cases[path].loaded, "and why not, when it did not")
+        adapter_session._release_adapter()
+        check.is_true(adapter_session._adapter == null, "ending the session lets the adapter go (a Node adapter would leak)")
 
     _clean()
     check.finish(self, "session_test")

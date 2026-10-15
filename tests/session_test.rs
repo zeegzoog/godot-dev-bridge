@@ -144,3 +144,97 @@ mod private_directories {
         );
     }
 }
+
+/// Makes `link` a directory link to `target` (a symbolic link on Unix, a junction on Windows, which
+/// needs no privilege).
+fn link_directory(link: &std::path::Path, target: &std::path::Path) {
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(target, link).unwrap();
+    #[cfg(windows)]
+    {
+        let status = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .stdout(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "mklink /J failed");
+    }
+}
+
+/// A link inside a session directory is removed, never followed: what it points to is not ours.
+#[test]
+fn clear_directory_removes_a_link_without_touching_what_it_points_to() {
+    let base = tempfile::tempdir().unwrap();
+    let victim = base.path().join("victim");
+    std::fs::create_dir(&victim).unwrap();
+    std::fs::write(victim.join("important.txt"), "keep me").unwrap();
+
+    let session = base.path().join("session");
+    std::fs::create_dir(&session).unwrap();
+    link_directory(&session.join("shots"), &victim);
+    std::fs::write(session.join("ready.json"), "{}").unwrap();
+
+    clear_directory(&session);
+
+    assert!(
+        victim.join("important.txt").exists(),
+        "a file behind a link was deleted"
+    );
+    assert!(!session.join("ready.json").exists());
+    assert!(
+        std::fs::symlink_metadata(session.join("shots")).is_err(),
+        "the link itself is gone"
+    );
+}
+
+#[test]
+fn a_session_record_that_exists_but_cannot_be_read_is_named_as_such() {
+    let root = tempfile::tempdir().unwrap();
+    let directory = session_directory(root.path(), "broken");
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(directory.join("session.json"), "{\"pid\": \"x\"}").unwrap();
+    let error = require_live(root.path(), "broken").unwrap_err().to_string();
+    assert!(
+        error.contains("session.json") && error.contains("unreadable"),
+        "{error}"
+    );
+}
+
+#[cfg(windows)]
+mod private_directories_windows {
+    use godot_dev_bridge::session::ensure_private_dir;
+
+    #[test]
+    fn a_junction_is_refused() {
+        let base = tempfile::tempdir().unwrap();
+        let real = base.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        let link = base.path().join("link");
+        let status = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&link)
+            .arg(&real)
+            .stdout(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let error = ensure_private_dir(&link).unwrap_err().to_string();
+        assert!(error.contains("link"), "{error}");
+    }
+
+    #[test]
+    fn a_new_directory_can_still_be_used_and_removed_by_its_owner() {
+        let base = tempfile::tempdir().unwrap();
+        let target = base.path().join("a").join("dev_bridge");
+        ensure_private_dir(&target).unwrap();
+        ensure_private_dir(&target).unwrap();
+        std::fs::write(target.join("session.json"), "{}").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(target.join("session.json")).unwrap(),
+            "{}"
+        );
+        std::fs::remove_dir_all(&target).unwrap();
+    }
+}

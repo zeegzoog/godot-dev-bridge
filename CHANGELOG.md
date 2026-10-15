@@ -25,9 +25,27 @@ First release: a standalone development bridge that any Godot 4.5+ project can u
 - Protocol version 1: the request and response files, the error codes, the verbs and the exit
   statuses are the contract.
 - Session names are validated and the spool directory is private to the user (on Unix: mode 0700,
-  a per-user location, no symbolic links, no other owner), so a session name cannot point outside
-  the spool root and another local user cannot drive a game.
+  a per-user location, no symbolic links, no other owner; on Windows: access rules for the user and
+  the system alone, no symbolic links or junctions, no other owner), so a session name cannot point
+  outside the spool root and another local user cannot drive a game. Starting a session clears its
+  directory without ever following a link out of it.
 - `start` and `stop` recognise the recorded game by its creation time (Windows, Linux), so a process
   that was handed the pid of a game that died is never mistaken for it or killed.
+- `start` uses the physics tick rate the project sets as its frame rate unless `--fps` is given, so a
+  project that does not run at 60 ticks per second is still stepped exactly. The executable is run as
+  it is on every platform (no console wrapper is needed for `game.log`), and a `shot` to a path that
+  cannot be written answers `bad_args`.
+- `ready.json` and `status` say whether the project adapter was found and registered (`adapter`),
+  and why not.
+- A usage mistake is answered with the client error object as well as clap's explanation, so every
+  failure of the client is one JSON object and status 2. `step --max` needs `--until`, and every
+  argument has help text.
+- A request that times out says when the game had already taken it (a `step` keeps running), answers
+  nobody collected are swept, an answer that is not JSON is reported as such, and a `start` with a
+  mistake in its arguments leaves the previous session's log alone.
+- `step --until` and `eval` no longer list every project setting on each evaluation (about 50 times
+  faster per tick), non-finite pointer positions are refused instead of answered as invalid JSON,
+  deeply nested or self-referencing values are cut off, a key has one name however it is spelled,
+  and an adapter that extends `Node` is freed when the session ends.
 
 [0.1.0]: https://github.com/zigenzoog/godot-dev-bridge/releases/tag/v0.1.0

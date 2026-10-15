@@ -72,8 +72,7 @@ fn the_plugin_installs_itself_into_a_fresh_project_and_the_game_can_be_driven() 
             .args(args)
             .current_dir(dir)
             .env("DEV_BRIDGE_ROOT", root.path())
-            .env("GODOT_PATH", &godot)
-            .env_remove("GODOT_CONSOLE_PATH");
+            .env("GODOT_PATH", &godot);
         let (status, stdout, _) = common::run_client(command, Duration::from_secs(120));
         (status, stdout)
     };
