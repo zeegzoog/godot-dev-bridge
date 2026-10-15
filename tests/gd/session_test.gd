@@ -147,6 +147,17 @@ func _initialize() -> void:
     session._complete_pending_step()
     check.equal(_answer("z5").result.ticks_run, 3, "the answer arrives when the step has run its ticks")
 
+    # A tap is released by the ticks of stepping, however the steps are split. The first tick of a step
+    # is counted inside `step` itself, so it has to release what falls due on it as well.
+    _ask(session, "i1", "tap", {"action": "ui_accept"})
+    check.equal(_ask(session, "i2", "status").result.held_inputs, ["action:ui_accept"], "a tap is held until its ticks are stepped")
+    _ask(session, "i3", "step", {"ticks": 1})
+    session._complete_pending_step()
+    check.equal(_ask(session, "i4", "status").result.held_inputs, ["action:ui_accept"], "one tick of a two-tick tap is not enough")
+    _ask(session, "i5", "step", {"ticks": 1})
+    session._complete_pending_step()
+    check.equal(_ask(session, "i6", "status").result.held_inputs, [], "the second one-tick step releases it")
+
     var quit_answer := _ask(session, "q1", "quit")
     check.equal(quit_answer.result, {"quitting": true}, "quit is answered")
     check.is_true(session.is_quitting(), "the session knows it is ending")

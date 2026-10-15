@@ -138,8 +138,8 @@ fn injected_input_is_seen_by_the_game_the_way_device_input_is() {
     bridge.ok(&["step", "1"]);
     let parked = bridge.ticker()["ticks"].as_i64().unwrap();
 
-    // Reference: treaker's l2-godot-dev-automation.md section 5.6 (measured): a press is seen as
-    // just pressed on the second tick after the park point, and a default tap is down for two ticks.
+    // Measured behaviour: a press is seen as just pressed on the second tick after the park point,
+    // and a default tap is down for two ticks.
     bridge.ok(&["tap", "--action", "ui_accept"]);
     bridge.ok(&["step", "10"]);
     let tapped = bridge.ticker();
@@ -170,6 +170,25 @@ fn injected_input_is_seen_by_the_game_the_way_device_input_is() {
     let (status, refused) = bridge.run(&["press", "--action", "no_such_action"]);
     assert_eq!(status, 1);
     assert_eq!(refused["error"]["code"], "bad_args");
+
+    // Splitting a step must not change what the game sees: a tap is released by the ticks stepped,
+    // however they are divided.
+    let before = bridge.ticker()["pressed_ticks"].as_i64().unwrap();
+    bridge.ok(&["tap", "--action", "ui_accept"]);
+    for _ in 0..3 {
+        bridge.ok(&["step", "1"]);
+    }
+    bridge.ok(&["step", "6"]);
+    let after = bridge.ticker()["pressed_ticks"].as_i64().unwrap();
+    assert_eq!(
+        after - before,
+        2,
+        "a tap stepped tick by tick is still down for two ticks"
+    );
+    assert_eq!(
+        bridge.ok(&["status"])["result"]["held_inputs"],
+        serde_json::json!([])
+    );
 }
 
 #[test]

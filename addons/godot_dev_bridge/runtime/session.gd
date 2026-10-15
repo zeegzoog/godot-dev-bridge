@@ -450,6 +450,10 @@ func _step(args: Dictionary) -> Dictionary:
     _controller.begin(limit, condition)
     if _controller.at_tick_start():
         return {"result": _step_result(until)}
+    # This very tick is the first of the step and was counted just now, not by a physics callback:
+    # what is scheduled to be released on it must be released here, or a step of one tick would never
+    # release anything and splitting a step would change what the game sees.
+    _input.release_due(_controller.total_ticks)
     return {"defer": true, "until": until}
 
 func _is_whole_number(value: Variant) -> bool:
