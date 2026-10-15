@@ -9,9 +9,39 @@ permissions:
   contents: write
 
 jobs:
+  verify:
+    name: Verify before publishing
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Tag matches the crate version
+        run: |
+          version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match Cargo.toml version v$version" >&2
+            exit 1
+          fi
+
+      - name: CHANGELOG.md has notes for this release
+        run: bash .github/scripts/release-notes.sh "$GITHUB_REF_NAME" > /dev/null
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Format, lint and test
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --all-targets --all-features -- -D warnings
+          cargo test --all-targets
+
   addon:
     name: Package Godot addon
-    runs-on: ubuntu-latest
+    needs: verify
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -19,15 +49,21 @@ jobs:
       - name: Package addon archive
         run: zip -r godot-dev-bridge-addon.zip addons/godot_dev_bridge
 
+      - name: Extract release notes from CHANGELOG.md
+        shell: bash
+        run: bash .github/scripts/release-notes.sh "$GITHUB_REF_NAME" > release-notes.md
+
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
         with:
           files: godot-dev-bridge-addon.zip
+          body_path: release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build:
     name: Build (${{ matrix.target }})
+    needs: verify
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -37,7 +73,7 @@ jobs:
             target: x86_64-pc-windows-msvc
             bin: godot-dev-bridge.exe
             archive_ext: zip
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
             bin: godot-dev-bridge
             archive_ext: tar.gz
@@ -75,9 +111,14 @@ jobs:
         run: |
           Compress-Archive -Path "target/${{ matrix.target }}/release/${{ matrix.bin }}" -DestinationPath "godot-dev-bridge-${{ matrix.target }}.zip"
 
+      - name: Extract release notes from CHANGELOG.md
+        shell: bash
+        run: bash .github/scripts/release-notes.sh "$GITHUB_REF_NAME" > release-notes.md
+
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
         with:
           files: godot-dev-bridge-${{ matrix.target }}.*
+          body_path: release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

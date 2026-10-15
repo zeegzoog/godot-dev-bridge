@@ -31,12 +31,12 @@ Pushing a tag matching `v*.*.*` triggers `.github/workflows/release.yml`, which 
 
    Stop and report if any check fails. Do not tag a red build.
 
-3. **Bump the version** in `Cargo.toml` (`[package] version = "X.Y.Z"`), then run `cargo build` once so `Cargo.lock`'s matching entry updates. `addons/godot_dev_bridge/plugin.cfg` has its own independent `version` field (the GDScript addon versions separately from the Rust server) — only touch it if the user explicitly asks to keep them in sync.
+3. **Bump the version** in `Cargo.toml` (`[package] version = "X.Y.Z"`), then run `cargo build` once so `Cargo.lock`'s matching entry updates. Set the same version in `addons/godot_dev_bridge/plugin.cfg` (`version="X.Y.Z"`): the client and the addon always ship together and `tests/version_sync_test.rs` fails if they differ. Add a `## [X.Y.Z] - YYYY-MM-DD` section to `CHANGELOG.md` (it becomes the release text; the release workflow fails without it).
 
 4. **Commit the bump:**
 
    ```bash
-   git add Cargo.toml Cargo.lock
+   git add Cargo.toml Cargo.lock addons/godot_dev_bridge/plugin.cfg CHANGELOG.md
    git commit -m "chore(release): bump version to vX.Y.Z"
    ```
 
@@ -56,7 +56,7 @@ Pushing a tag matching `v*.*.*` triggers `.github/workflows/release.yml`, which 
    gh run watch $(gh run list --workflow=release.yml -L 1 --json databaseId -q '.[0].databaseId')
    ```
 
-   All 5 jobs (`addon`, plus the 4 binary matrix targets `x86_64-pc-windows-msvc`, `x86_64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin`) must succeed.
+   All 6 jobs (`verify`, `addon`, plus the 4 binary matrix targets `x86_64-pc-windows-msvc`, `x86_64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin`) must succeed.
 
 8. **Verify the release:**
 

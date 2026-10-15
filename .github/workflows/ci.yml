@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GODOT_VERSION: 4.5-stable
+
+jobs:
+  rust:
+    name: Rust (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo test --all-targets
+      - name: CHANGELOG.md documents the current version
+        if: runner.os == 'Linux'
+        run: bash .github/scripts/release-notes.sh "v$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)" > /dev/null
+
+  godot:
+    name: Godot addon (headless)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Godot ${{ env.GODOT_VERSION }}
+        run: |
+          curl -fsSL -o godot.zip "https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_linux.x86_64.zip"
+          unzip -q godot.zip -d "$RUNNER_TEMP/godot"
+          chmod +x "$RUNNER_TEMP/godot/Godot_v${GODOT_VERSION}_linux.x86_64"
+          echo "GODOT_PATH=$RUNNER_TEMP/godot/Godot_v${GODOT_VERSION}_linux.x86_64" >> "$GITHUB_ENV"
+
+      - name: Import the addon dev project
+        run: $GODOT_PATH --headless --path . --import
+
+      - name: GDScript syntax check
+        run: |
+          for script in $(find addons tests -name '*.gd' | sort); do
+            echo "check $script"
+            $GODOT_PATH --headless --path . --check-only --script "$script" || exit 1
+          done
+
+      - name: GDScript unit scripts and end-to-end tests against a real Godot
+        run: cargo test --test gdscript_test --test e2e_test --test installer_test -- --ignored --test-threads=2
