@@ -16,8 +16,11 @@ func _init(addon_directory: String = "") -> void:
     _policy = POLICY.new(addon_directory)
 
 
+## Godot asks export plugins in the order of their names, and the built-in "GDScript" plugin
+## compiles every `.gd` file as soon as it is asked: a plugin named after it would never see a script
+## and could not skip one. This name has to sort before "GDScript".
 func _get_name() -> String:
-    return "GodotDevBridgeExport"
+    return "DevBridgeExport"
 
 
 func _export_begin(_features: PackedStringArray, is_debug: bool, _path: String, _flags: int) -> void:

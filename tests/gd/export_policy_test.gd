@@ -31,6 +31,15 @@ func _initialize() -> void:
 
     check.is_true(not policy.should_skip("res://anything.gd", false, ""), "an empty adapter setting matches nothing")
 
+    # The file picker of Project Settings stores the adapter as a uid://, the export asks by path.
+    var adapter_id := ResourceUID.create_id()
+    ResourceUID.add_id(adapter_id, ADAPTER)
+    var as_uid := ResourceUID.id_to_text(adapter_id)
+    check.is_true(policy.should_skip(ADAPTER, false, as_uid), "an adapter stored as a uid:// is skipped too")
+    check.is_true(not policy.should_skip(ADAPTER, true, as_uid), "but not in a debug export")
+    check.is_true(not policy.should_skip("res://dev/Other.gd", false, as_uid), "and the uid names only its own file")
+    check.is_true(not policy.should_skip(ADAPTER, false, "uid://no_such_uid_registered"), "an unknown uid matches nothing")
+
     var moved: Variant = load(POLICY).new("res://tools/bridge")
     check.is_true(moved.should_skip("res://tools/bridge/runtime/session.gd", false, ""), "the policy follows the addon to another folder")
     check.is_true(not moved.should_skip(ADDON + "/runtime/session.gd", false, ""), "and ignores the old location")

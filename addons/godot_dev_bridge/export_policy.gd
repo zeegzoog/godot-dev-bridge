@@ -19,10 +19,20 @@ func _init(addon_directory: String = "") -> void:
 func should_skip(path: String, is_debug: bool, adapter_path: String) -> bool:
     if is_debug:
         return false
-    if not adapter_path.is_empty() and path == adapter_path:
+    var adapter := _plain_path(adapter_path)
+    if not adapter.is_empty() and path == adapter:
         return true
     var prefix := _addon_directory + "/"
     if _addon_directory.is_empty() or not path.begins_with(prefix):
         return false
     var relative := path.trim_prefix(prefix)
     return relative.begins_with("runtime/") or relative in EDITOR_ONLY
+
+
+## The adapter setting may hold a `uid://` (the file picker of Project Settings stores one), while
+## the export asks by path. A uid that is not registered stays as it is and matches nothing.
+func _plain_path(path: String) -> String:
+    if not path.begins_with("uid://"):
+        return path
+    var id := ResourceUID.text_to_id(path)
+    return ResourceUID.get_id_path(id) if ResourceUID.has_id(id) else path
