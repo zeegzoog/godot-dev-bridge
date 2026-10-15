@@ -3,11 +3,18 @@ use godot_dev_bridge::session::{
     require_live, session_directory, write_record,
 };
 
+fn now() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs_f64()
+}
+
 fn record(pid: u32) -> SessionRecord {
     SessionRecord {
         pid,
         command: vec!["godot".into(), "--path".into(), "p".into()],
-        started: 1.5,
+        started: now(),
     }
 }
 
@@ -94,4 +101,46 @@ fn the_log_tail_keeps_only_the_last_lines_and_the_note_is_empty_without_a_log() 
         note.starts_with("; the log ends:\n") && note.contains("line 100"),
         "{note}"
     );
+}
+
+#[cfg(unix)]
+mod private_directories {
+    use godot_dev_bridge::session::ensure_private_dir;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn mode(path: &std::path::Path) -> u32 {
+        std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+    }
+
+    #[test]
+    fn a_new_directory_is_private_to_the_user() {
+        let base = tempfile::tempdir().unwrap();
+        let target = base.path().join("a").join("dev_bridge");
+        ensure_private_dir(&target).unwrap();
+        assert_eq!(mode(&target), 0o700);
+    }
+
+    #[test]
+    fn an_existing_directory_of_ours_is_tightened() {
+        let base = tempfile::tempdir().unwrap();
+        let target = base.path().join("shared");
+        std::fs::create_dir(&target).unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o777)).unwrap();
+        ensure_private_dir(&target).unwrap();
+        assert_eq!(mode(&target), 0o700);
+    }
+
+    #[test]
+    fn a_symbolic_link_is_refused() {
+        let base = tempfile::tempdir().unwrap();
+        let real = base.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        let link = base.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let error = ensure_private_dir(&link).unwrap_err().to_string();
+        assert!(
+            error.contains("symbolic link") || error.contains("not a directory"),
+            "{error}"
+        );
+    }
 }

@@ -4,7 +4,7 @@ use clap::Parser;
 use common::{FakeGame, ok};
 use godot_dev_bridge::cli::{Cli, StartArgs, Verb};
 use godot_dev_bridge::launch::{
-    build_godot_command, check_protocol, ensure_not_running, import_hint, stop_with, wait_ready,
+    build_godot_command, check_protocol, ensure_not_running, import_required, stop_with, wait_ready,
 };
 use godot_dev_bridge::session::{SessionRecord, session_directory, write_record};
 use serde_json::json;
@@ -21,11 +21,18 @@ fn start_args(extra: &[&str]) -> StartArgs {
     }
 }
 
+fn now() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs_f64()
+}
+
 fn record(pid: u32) -> SessionRecord {
     SessionRecord {
         pid,
         command: vec![],
-        started: 0.0,
+        started: now(),
     }
 }
 
@@ -161,15 +168,18 @@ fn a_live_session_blocks_start_but_a_stale_one_does_not() {
 }
 
 #[test]
-fn a_project_that_was_never_imported_gets_the_import_command_in_the_hint() {
+fn a_project_that_was_never_imported_is_refused_with_a_command_that_can_be_pasted() {
     let project = tempfile::tempdir().unwrap();
-    let hint = import_hint(project.path());
+    let problem = import_required(Path::new("C:/Tools/Godot 4/godot.exe"), project.path())
+        .expect("no .godot directory means the project was never imported");
+    assert!(problem.contains("has not been imported"), "{problem}");
     assert!(
-        hint.contains("--import") && hint.contains("--headless"),
-        "{hint}"
+        problem.contains("\"C:/Tools/Godot 4/godot.exe\" --headless --path")
+            && problem.contains("--import"),
+        "the command names the real executable, quoted because of the space: {problem}"
     );
     std::fs::create_dir(project.path().join(".godot")).unwrap();
-    assert_eq!(import_hint(project.path()), "");
+    assert!(import_required(Path::new("godot"), project.path()).is_none());
 }
 
 #[test]
@@ -197,48 +207,47 @@ fn wait_ready_returns_the_ready_file_once_it_appears() {
         )
         .unwrap();
     });
-    let ready = wait_ready(dir.path(), Duration::from_secs(5), &mut || None, "").unwrap();
+    let ready = wait_ready(dir.path(), Duration::from_secs(5), &mut || None).unwrap();
     writer.join().unwrap();
     assert_eq!(ready["pid"], 7);
 }
 
 #[test]
-fn wait_ready_reports_an_early_exit_with_the_log_and_the_hint() {
+fn wait_ready_reports_an_early_exit_with_the_end_of_the_log() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("game.log"), "SCRIPT ERROR: boom\n").unwrap();
-    let calls = Cell::new(0);
-    let error = wait_ready(
-        dir.path(),
-        Duration::from_secs(5),
-        &mut || {
-            calls.set(calls.get() + 1);
-            (calls.get() > 2).then(|| "exit status: 1".to_string())
-        },
-        "; run the import",
+    std::fs::write(
+        dir.path().join("game.log"),
+        "SCRIPT ERROR: boom
+",
     )
+    .unwrap();
+    let calls = Cell::new(0);
+    let error = wait_ready(dir.path(), Duration::from_secs(5), &mut || {
+        calls.set(calls.get() + 1);
+        (calls.get() > 2).then(|| "exit status: 1".to_string())
+    })
     .unwrap_err()
     .to_string();
     assert!(
-        error.contains("exit status: 1")
-            && error.contains("boom")
-            && error.contains("run the import"),
+        error.contains("exit status: 1") && error.contains("boom"),
         "{error}"
     );
 }
 
 #[test]
-fn wait_ready_times_out_with_the_log_and_the_hint() {
+fn wait_ready_times_out_with_the_end_of_the_log() {
     let dir = tempfile::tempdir().unwrap();
-    let error = wait_ready(
-        dir.path(),
-        Duration::from_millis(100),
-        &mut || None,
-        "; hint",
+    std::fs::write(
+        dir.path().join("game.log"),
+        "still loading
+",
     )
-    .unwrap_err()
-    .to_string();
+    .unwrap();
+    let error = wait_ready(dir.path(), Duration::from_millis(100), &mut || None)
+        .unwrap_err()
+        .to_string();
     assert!(
-        error.contains("not ready within") && error.contains("hint"),
+        error.contains("not ready within") && error.contains("still loading"),
         "{error}"
     );
 }

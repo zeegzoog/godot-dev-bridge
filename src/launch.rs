@@ -5,8 +5,8 @@ use crate::config::{Context, find_project, resolve_godot};
 use crate::error::{ClientError, Result};
 use crate::process;
 use crate::session::{
-    SessionRecord, clear_directory, death_note, log_path, read_record, session_directory,
-    write_record,
+    SessionRecord, clear_directory, death_note, ensure_private_dir, game_alive, log_path,
+    read_record, session_directory, write_record,
 };
 use crate::spool::{Wait, read_json, send_request};
 use serde_json::{Value, json};
@@ -96,7 +96,7 @@ pub fn build_godot_command(
 pub fn ensure_not_running(root: &Path, name: &str) -> Result<()> {
     let directory = session_directory(root, name);
     match read_record(&directory) {
-        Some(record) if process::is_alive(record.pid) => Err(ClientError::msg(format!(
+        Some(record) if game_alive(&record) => Err(ClientError::msg(format!(
             "session '{name}' is already running (pid {}); stop it first",
             record.pid
         ))),
@@ -104,17 +104,28 @@ pub fn ensure_not_running(root: &Path, name: &str) -> Result<()> {
     }
 }
 
-/// Extra text for a failed start when the project was never imported (no `.godot` directory):
-/// the class cache is missing, so scripts cannot resolve each other's `class_name`.
-pub fn import_hint(project: &Path) -> String {
-    if project.join(".godot").is_dir() {
-        String::new()
+/// `text` as one shell word: in double quotes when it has a space.
+fn shell_word(text: &str) -> String {
+    if text.contains(' ') {
+        format!("\"{text}\"")
     } else {
-        format!(
-            "; the project has not been imported yet, run `godot --headless --path {} --import` once",
-            project.display()
-        )
+        text.to_string()
     }
+}
+
+/// The problem to report when the project was never imported (it has no `.godot` directory), or
+/// `None`. Without the import the class cache and the imported resources are missing: the game still
+/// starts and the bridge still answers, but the game is broken, so `start` refuses instead of
+/// reporting a success. The message carries the command to run, with the real paths.
+pub fn import_required(godot: &Path, project: &Path) -> Option<String> {
+    if project.join(".godot").is_dir() {
+        return None;
+    }
+    Some(format!(
+        "the project has not been imported yet: run `{} --headless --path {} --import` once, then start again",
+        shell_word(&godot.to_string_lossy()),
+        shell_word(&project.to_string_lossy())
+    ))
 }
 
 /// The game must speak the protocol this client speaks.
@@ -129,12 +140,11 @@ pub fn check_protocol(ready: &Value) -> Result<()> {
 }
 
 /// Waits for the game's `ready.json`. `poll_exit` returns a description once the game process
-/// has exited. Both failures carry the end of `game.log` and `hint`.
+/// has exited. Both failures carry the end of `game.log`.
 pub fn wait_ready(
     directory: &Path,
     timeout: Duration,
     poll_exit: &mut dyn FnMut() -> Option<String>,
-    hint: &str,
 ) -> Result<Value> {
     let ready_path = directory.join("ready.json");
     let deadline = Instant::now() + timeout;
@@ -144,13 +154,13 @@ pub fn wait_ready(
         }
         if let Some(status) = poll_exit() {
             return Err(ClientError::msg(format!(
-                "the game ended ({status}) before it was ready{}{hint}",
+                "the game ended ({status}) before it was ready{}",
                 death_note(directory)
             )));
         }
         if Instant::now() >= deadline {
             return Err(ClientError::msg(format!(
-                "the game was not ready within {} s{}{hint}",
+                "the game was not ready within {} s{}",
                 timeout.as_secs_f64(),
                 death_note(directory)
             )));
@@ -229,9 +239,13 @@ pub fn start_session(
     ensure_not_running(&ctx.root, &name)?;
     let godot = resolve_godot(ctx, args.godot.as_deref())?;
     let project = find_project(&ctx.cwd, args.project.as_deref())?;
+    if let Some(problem) = import_required(&godot, &project) {
+        return Err(ClientError::msg(problem));
+    }
 
     let directory = session_directory(&ctx.root, &name);
-    std::fs::create_dir_all(&directory)?;
+    ensure_private_dir(&ctx.root)?;
+    ensure_private_dir(&directory)?;
     clear_directory(&directory);
 
     let command = build_godot_command(&godot, &project, &directory, args)?;
@@ -249,19 +263,13 @@ pub fn start_session(
         },
     )?;
 
-    let hint = import_hint(&project);
-    let ready = wait_ready(
-        &directory,
-        timeout,
-        &mut || {
-            child
-                .try_wait()
-                .ok()
-                .flatten()
-                .map(|status| status.to_string())
-        },
-        &hint,
-    )
+    let ready = wait_ready(&directory, timeout, &mut || {
+        child
+            .try_wait()
+            .ok()
+            .flatten()
+            .map(|status| status.to_string())
+    })
     .and_then(|ready| check_protocol(&ready).map(|()| ready));
     match ready {
         Ok(ready) => Ok(json!({
@@ -328,7 +336,7 @@ pub fn stop_session(ctx: &Context, session: Option<&str>, timeout: Duration) -> 
         &record,
         timeout,
         STOP_GRACE,
-        &process::is_alive,
+        &|pid| process::is_alive_since(pid, record.started),
         &process::kill,
     ))
 }

@@ -15,6 +15,13 @@ fn context(dir: &Path) -> Context {
     }
 }
 
+fn now() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs_f64()
+}
+
 fn session(ctx: &Context, name: &str, pid: u32) -> PathBuf {
     let directory = session_directory(&ctx.root, name);
     std::fs::create_dir_all(&directory).unwrap();
@@ -23,7 +30,7 @@ fn session(ctx: &Context, name: &str, pid: u32) -> PathBuf {
         &SessionRecord {
             pid,
             command: vec![],
-            started: 0.0,
+            started: now(),
         },
     )
     .unwrap();
@@ -192,5 +199,73 @@ fn stop_of_an_unknown_session_is_a_client_error() {
             .as_str()
             .unwrap()
             .contains("no session named")
+    );
+}
+
+#[test]
+fn a_session_name_that_climbs_out_of_the_root_is_refused_and_deletes_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = context(dir.path());
+    std::fs::create_dir_all(&ctx.root).unwrap();
+    // Next to the spool root: what `--session ..` would have cleared out.
+    let victim = dir.path().join("victim.txt");
+    std::fs::write(&victim, "keep me").unwrap();
+
+    for name in ["..", ".", "../elsewhere"] {
+        let (status, answer) = drive(&ctx, &["--session", name, "start", "--headless"]);
+        assert_eq!(status, 2, "{name}: {answer}");
+        assert!(
+            answer["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("session name"),
+            "{name}: {answer}"
+        );
+        let (status, _) = drive(&ctx, &["--session", name, "stop"]);
+        assert_eq!(status, 2, "{name}");
+    }
+    assert!(victim.exists(), "a file outside the spool root was deleted");
+
+    let mut from_env = context(dir.path());
+    from_env.session_env = Some("..".into());
+    assert_eq!(
+        drive(&from_env, &["ping"]).0,
+        2,
+        "DEV_BRIDGE_SESSION is checked too"
+    );
+    assert!(victim.exists());
+}
+
+#[test]
+fn start_refuses_a_project_that_was_never_imported_before_starting_anything() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ctx = context(dir.path());
+    // A file that exists is all the client needs of "Godot" to get as far as the import check.
+    let godot = dir.path().join("fake-godot");
+    std::fs::write(&godot, "").unwrap();
+    ctx.godot_env.godot_path = Some(godot.to_string_lossy().into_owned());
+    let project = dir.path().join("game");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(
+        project.join("project.godot"),
+        "config_version=5
+",
+    )
+    .unwrap();
+
+    let (status, answer) = drive(&ctx, &["start", "--headless", "--project", "game"]);
+    assert_eq!(status, 2, "{answer}");
+    let message = answer["error"]["message"].as_str().unwrap();
+    assert!(
+        message.contains("has not been imported") && message.contains("--import"),
+        "{message}"
+    );
+    assert!(
+        message.contains(&project.to_string_lossy().into_owned()),
+        "the command names the project: {message}"
+    );
+    assert!(
+        !ctx.root.join("default").exists(),
+        "nothing was started or created"
     );
 }

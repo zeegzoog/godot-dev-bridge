@@ -47,12 +47,23 @@ impl Context {
                  put Windows paths in single quotes, e.g. GODOT_PATH='C:\\Godot\\Godot.exe'"
             ),
         }
+        let cwd = std::env::current_dir().unwrap_or_default();
         Self {
-            root: non_empty("DEV_BRIDGE_ROOT")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| std::env::temp_dir().join("dev_bridge")),
+            // Absolute, because the game runs with the project as its working directory and
+            // would otherwise look for the session directory in the wrong place.
+            root: absolutize(
+                &cwd,
+                &non_empty("DEV_BRIDGE_ROOT")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| {
+                        let runtime = non_empty("XDG_RUNTIME_DIR")
+                            .map(PathBuf::from)
+                            .filter(|dir| dir.is_absolute());
+                        default_root(&std::env::temp_dir(), runtime.as_deref(), effective_uid())
+                    }),
+            ),
             session_env: non_empty("DEV_BRIDGE_SESSION"),
-            cwd: std::env::current_dir().unwrap_or_default(),
+            cwd,
             godot_env: GodotEnv {
                 godot_path: non_empty("GODOT_PATH"),
                 godot: non_empty("GODOT"),
@@ -71,6 +82,59 @@ impl Context {
             .map(str::to_string)
             .or_else(|| self.session_env.clone())
             .unwrap_or_else(|| "default".to_string())
+    }
+}
+
+/// Where sessions live when `DEV_BRIDGE_ROOT` is not set, private to the user: on Unix the
+/// per-user runtime directory when there is one (`runtime_dir`), otherwise a directory named after
+/// the user id in the shared temporary directory, since `/tmp` is shared and its names are
+/// predictable. Windows and macOS (`uid` is `None`) give every user a temporary directory of their
+/// own.
+pub fn default_root(temp: &Path, runtime_dir: Option<&Path>, uid: Option<u32>) -> PathBuf {
+    match (runtime_dir, uid) {
+        (Some(runtime), Some(_)) => runtime.join("dev_bridge"),
+        (None, Some(uid)) => temp.join(format!("dev_bridge-{uid}")),
+        (_, None) => temp.join("dev_bridge"),
+    }
+}
+
+#[cfg(unix)]
+fn effective_uid() -> Option<u32> {
+    // SAFETY: a plain query of the calling process's identity.
+    Some(unsafe { libc::geteuid() })
+}
+
+#[cfg(not(unix))]
+fn effective_uid() -> Option<u32> {
+    None
+}
+
+/// `path` itself when it is absolute, otherwise `path` below `cwd`.
+pub fn absolutize(cwd: &Path, path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        cwd.join(path)
+    }
+}
+
+/// A session name becomes a directory name below the spool root, and starting a session clears
+/// that directory, so a name must not be able to point anywhere else: 1 to 64 ASCII letters,
+/// digits, `.`, `_` or `-`, and neither `.` nor `..`.
+pub fn validate_session_name(name: &str) -> Result<()> {
+    let plain = !name.is_empty()
+        && name.len() <= 64
+        && name != "."
+        && name != ".."
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'));
+    if plain {
+        Ok(())
+    } else {
+        Err(ClientError::msg(format!(
+            "invalid session name '{name}': use 1 to 64 letters, digits, '.', '_' or '-' (not '.' or '..')"
+        )))
     }
 }
 

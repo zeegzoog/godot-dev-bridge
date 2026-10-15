@@ -59,6 +59,57 @@ pub fn death_note(directory: &Path) -> String {
     }
 }
 
+/// Creates `path` (and its parents) for a session and makes sure nobody else can use it. On Unix
+/// the directory is private to the user (mode 0700); one that exists is accepted only when it is a
+/// real directory owned by this user, and is tightened if it was more open. The spool is a command
+/// channel into the game (`eval` can run anything), so a directory another user can write to would
+/// let them drive it.
+#[cfg(unix)]
+pub fn ensure_private_dir(path: &Path) -> Result<()> {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(path)?;
+    let meta = std::fs::symlink_metadata(path)?;
+    if meta.file_type().is_symlink() {
+        return Err(ClientError::msg(format!(
+            "{} is a symbolic link; refusing to use it as a session directory",
+            path.display()
+        )));
+    }
+    if !meta.is_dir() {
+        return Err(ClientError::msg(format!(
+            "{} is not a directory",
+            path.display()
+        )));
+    }
+    // SAFETY: a plain query of the calling process's identity.
+    if meta.uid() != unsafe { libc::geteuid() } {
+        return Err(ClientError::msg(format!(
+            "{} belongs to another user; refusing to use it. Set DEV_BRIDGE_ROOT to a directory of your own",
+            path.display()
+        )));
+    }
+    if meta.mode() & 0o077 != 0 {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+pub fn ensure_private_dir(path: &Path) -> Result<()> {
+    std::fs::create_dir_all(path)?;
+    Ok(())
+}
+
+/// Whether the game a session recorded is still running (and is still that game: see
+/// `process::is_alive_since`).
+pub fn game_alive(record: &SessionRecord) -> bool {
+    process::is_alive_since(record.pid, record.started)
+}
+
 /// The session's directory and record, or an error when no live session has that name.
 pub fn require_live(root: &Path, name: &str) -> Result<(PathBuf, SessionRecord)> {
     let directory = session_directory(root, name);
@@ -68,7 +119,7 @@ pub fn require_live(root: &Path, name: &str) -> Result<(PathBuf, SessionRecord)>
             directory.display()
         )));
     };
-    if !process::is_alive(record.pid) {
+    if !game_alive(&record) {
         return Err(ClientError::msg(format!(
             "the game of session '{name}' (pid {}) is not running{}",
             record.pid,
@@ -94,7 +145,7 @@ pub fn list(root: &Path) -> Vec<Value> {
     found
         .into_iter()
         .map(|(name, record)| {
-            json!({"session": name, "pid": record.pid, "alive": process::is_alive(record.pid)})
+            json!({"session": name, "pid": record.pid, "alive": game_alive(&record)})
         })
         .collect()
 }

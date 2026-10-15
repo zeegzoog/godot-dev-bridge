@@ -1,4 +1,6 @@
-use godot_dev_bridge::config::{Context, GodotEnv, find_project, resolve_godot};
+use godot_dev_bridge::config::{
+    Context, GodotEnv, absolutize, default_root, find_project, resolve_godot, validate_session_name,
+};
 use std::path::Path;
 
 fn touch(path: &Path) {
@@ -158,4 +160,65 @@ fn an_explicit_project_must_contain_project_godot() {
     );
     let relative = find_project(dir.path(), Some(Path::new("."))).unwrap();
     assert!(relative.join("project.godot").is_file());
+}
+
+#[test]
+fn plain_session_names_are_accepted() {
+    for name in [
+        "default",
+        "a",
+        "my-game-2",
+        "my_game.v2",
+        "A1",
+        &"x".repeat(64),
+    ] {
+        assert!(validate_session_name(name).is_ok(), "{name}");
+    }
+}
+
+#[test]
+fn a_session_name_cannot_leave_the_spool_root() {
+    for name in [
+        "",
+        ".",
+        "..",
+        "../x",
+        "a/b",
+        r"a\b",
+        "/abs",
+        r"C:\x",
+        "C:x",
+        "a b",
+        "tab\t",
+        "ä",
+        &"x".repeat(65),
+    ] {
+        let error = validate_session_name(name).expect_err(name).to_string();
+        assert!(error.contains("session name"), "{name}: {error}");
+    }
+}
+
+#[test]
+fn a_relative_path_is_made_absolute_against_the_working_directory() {
+    let cwd = Path::new("/work/project");
+    assert_eq!(absolutize(cwd, Path::new(".bridge")), cwd.join(".bridge"));
+    let absolute = std::env::temp_dir();
+    assert_eq!(absolutize(cwd, &absolute), absolute);
+}
+
+#[test]
+fn the_default_spool_root_is_private_to_the_user_on_every_platform() {
+    let temp = Path::new("/tmp");
+    // Unix with a per-user runtime directory: nobody else can enter it.
+    assert_eq!(
+        default_root(temp, Some(Path::new("/run/user/1000")), Some(1000)),
+        Path::new("/run/user/1000/dev_bridge")
+    );
+    // Unix without one: the shared temporary directory, so the name carries the user id.
+    assert_eq!(
+        default_root(temp, None, Some(1000)),
+        Path::new("/tmp/dev_bridge-1000")
+    );
+    // Windows and macOS give every user a temporary directory of their own.
+    assert_eq!(default_root(temp, None, None), Path::new("/tmp/dev_bridge"));
 }
