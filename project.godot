@@ -7,6 +7,7 @@ config_version=5
 [application]
 
 config/name="Godot Dev Bridge (addon dev project)"
+run/main_scene="res://tests/fixtures/ticker.tscn"
 config/features=PackedStringArray("4.5")
 
 [autoload]
@@ -16,3 +17,7 @@ DevBridge="*res://addons/godot_dev_bridge/dev_bridge.gd"
 [editor_plugins]
 
 enabled=PackedStringArray("res://addons/godot_dev_bridge/plugin.cfg")
+
+[godot_dev_bridge]
+
+adapter="res://tests/fixtures/adapter.gd"

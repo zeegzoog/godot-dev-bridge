@@ -161,3 +161,77 @@ pub fn ensure_imported(godot: &Path) {
         *done = true;
     }
 }
+
+/// Copies a directory tree.
+pub fn copy_dir(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).expect("create target directory");
+    for entry in std::fs::read_dir(from)
+        .expect("read source directory")
+        .filter_map(|entry| entry.ok())
+    {
+        let target = to.join(entry.file_name());
+        if entry.path().is_dir() {
+            copy_dir(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), target).expect("copy file");
+        }
+    }
+}
+
+/// Runs the client with piped output and a deadline; returns (exit status, stdout, stderr).
+///
+/// After the client has exited its output pipes must reach end-of-file. If they do not, a process
+/// the client started (the game) inherited them, and every caller that waits for the pipe to close
+/// (an agent's shell tool, `Command::output()`) would wait for the game to exit instead.
+pub fn run_client(mut command: std::process::Command, deadline: Duration) -> (i32, String, String) {
+    use std::io::Read;
+    use std::sync::mpsc::channel;
+
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn().expect("the client starts");
+    let mut stdout = child.stdout.take().expect("piped stdout");
+    let mut stderr = child.stderr.take().expect("piped stderr");
+    let (out_tx, out_rx) = channel();
+    let (err_tx, err_rx) = channel();
+    std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = stdout.read_to_end(&mut bytes);
+        let _ = out_tx.send(bytes);
+    });
+    std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = stderr.read_to_end(&mut bytes);
+        let _ = err_tx.send(bytes);
+    });
+
+    let end = Instant::now() + deadline;
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("poll the client") {
+            break status;
+        }
+        if Instant::now() > end {
+            let _ = child.kill();
+            panic!("the client did not exit within {deadline:?}");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let grace = Duration::from_secs(5);
+    let out = out_rx.recv_timeout(grace).unwrap_or_else(|_| {
+        panic!(
+            "the client exited but its stdout pipe stayed open: a process it started inherited it"
+        )
+    });
+    let err = err_rx.recv_timeout(grace).unwrap_or_else(|_| {
+        panic!(
+            "the client exited but its stderr pipe stayed open: a process it started inherited it"
+        )
+    });
+    (
+        status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out).into_owned(),
+        String::from_utf8_lossy(&err).into_owned(),
+    )
+}
