@@ -112,6 +112,10 @@ func _initialize() -> void:
     check.equal(_ask(session, "d4", "list").result, [1, [1.0, 1.0]], "its value is converted for JSON")
     var failing := _ask(session, "d5", "broken")
     check.is_true(failing.has("ok"), "a project command that fails inside its own script still gets an answer (the engine logs the script error)")
+    var refused := _ask(session, "d6", "echo", {"__bad_args__": "`a` must be a number."})
+    check.equal(refused.ok, false, "a project command that refuses its arguments is not a success")
+    check.equal(refused.error, {"code": "bad_args", "message": "`a` must be a number."}, "it is a bad_args error with the command's message")
+    check.equal(_ask(session, "d7", "echo", {"error": "x"}).result, {"error": "x"}, "a dictionary with an error entry is still a result")
 
     session._handlers["rogue"] = {"callable": func(_args: Dictionary) -> int: return 5, "help": ""}
     var rogue := _ask(session, "r1", "rogue")
@@ -193,6 +197,19 @@ func _initialize() -> void:
     check.equal(made.quits.count, 1, "the quit action ran")
     var closed: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(_directory.path_join("closed.json")))
     check.equal(closed, {"reason": "quit"}, "closed.json says why")
+    session.game_exiting()
+    closed = JSON.parse_string(FileAccess.get_file_as_string(_directory.path_join("closed.json")))
+    check.equal(closed, {"reason": "quit"}, "the game exiting after the session ended it keeps the session's reason")
+
+    # A game that ends on its own (its code quits, its window is closed) says so as well.
+    _clean()
+    var own := _new_session()
+    own.session.start()
+    own.session.game_exiting()
+    closed = JSON.parse_string(FileAccess.get_file_as_string(_directory.path_join("closed.json")))
+    check.equal(closed, {"reason": "game"}, "a game that ends on its own says so in closed.json")
+    check.is_true(own.session.is_quitting(), "and the session knows it is over")
+    check.equal(own.quits.count, 0, "the game is already ending, so the session does not ask it to")
 
     # The driver can tell from `ready.json` what became of the project adapter.
     var adapter_cases := {

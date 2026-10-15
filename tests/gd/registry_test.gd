@@ -41,6 +41,10 @@ func _initialize() -> void:
     check.is_true(missing["nope"] is Dictionary and missing["nope"].has("error"), "an unknown provider answers an error for itself")
 
     check.equal(registry.run_command("echo", {"a": 1}), {"value": {"a": 1}}, "a command's value is wrapped")
+    check.equal(registry.run_command("echo", {"__bad_args__": "`a` is missing."}), {"bad_args": "`a` is missing."}, "a dictionary whose only key is __bad_args__ refuses the arguments")
+    check.equal(registry.run_command("echo", {"__bad_args__": 7}), {"bad_args": "7"}, "with its value as the message")
+    check.equal(registry.run_command("echo", {"__bad_args__": "x", "b": 2}), {"value": {"__bad_args__": "x", "b": 2}}, "a dictionary with other keys is a value")
+    check.equal(registry.run_command("echo", {"error": "x"}), {"value": {"error": "x"}}, "and so is one with an error entry")
 
     var nothing := Registry.new()
     nothing.add_command("quiet", func(_args: Dictionary) -> void: pass)

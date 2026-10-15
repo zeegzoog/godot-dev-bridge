@@ -44,13 +44,20 @@ fn timeout_for(cli: &Cli) -> Result<Duration> {
 fn execute(cli: &Cli, ctx: &Context) -> Result<(i32, Value)> {
     let timeout = timeout_for(cli)?;
     let session = cli.session.as_deref();
-    if !matches!(cli.verb, Verb::Sessions) {
+    if !matches!(cli.verb, Verb::Sessions { .. }) {
         config::validate_session_name(&ctx.session_name(session))?;
     }
     match &cli.verb {
         Verb::Start(args) => Ok((0, launch::start_session(ctx, session, timeout, args)?)),
         Verb::Stop => Ok((0, launch::stop_session(ctx, session, timeout)?)),
-        Verb::Sessions => Ok((0, json!({"ok": true, "sessions": session::list(&ctx.root)}))),
+        Verb::Sessions { prune } => {
+            let mut answer = json!({"ok": true});
+            if *prune {
+                answer["pruned"] = json!(session::prune(&ctx.root, session::LEFTOVER_AGE)?);
+            }
+            answer["sessions"] = json!(session::list(&ctx.root));
+            Ok((0, answer))
+        }
         verb => {
             let (command, args) = cli::command_for(verb, ctx)?;
             let name = ctx.session_name(session);

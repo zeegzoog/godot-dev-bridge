@@ -21,6 +21,12 @@ func _initialize() -> void:
     check.is_true(not stub.is_physics_processing(), "and its processing is off")
     check.is_true(stub.session == null, "and it loaded nothing")
 
+    var inert: Node = load(STUB_PATH).new()
+    root.add_child(inert)
+    root.remove_child(inert)
+    inert.free()
+    check.is_true(DirAccess.get_files_at(directory).is_empty(), "an inert stub leaving the tree writes nothing")
+
     check.is_true(not stub.enable(PackedStringArray(), true), "no --bridge-dir: inert")
     check.is_true(not stub.enable(PackedStringArray(["--bridge-dir=" + directory]), false), "a non-debug build ignores the request")
     check.is_true(not stub.enable(PackedStringArray(["--bridge-dir=" + directory + "/missing"]), true), "a missing directory is not enabled")
@@ -39,8 +45,12 @@ func _initialize() -> void:
 
     # Switch the stub off again before finishing: a physics tick would otherwise park the game.
     stub.set_physics_process(false)
-    stub.session = null
+    # The tree takes the stub out as the game ends, whoever ended it.
     root.remove_child(stub)
+    var closed: Variant = JSON.parse_string(FileAccess.get_file_as_string(directory.path_join("closed.json")))
+    check.equal(closed, {"reason": "game"}, "a game that ends on its own tells its session, which says so")
+    check.equal(quits.count, 0, "and is not asked to quit again")
+    stub.session = null
     stub.free()
     for leftover in DirAccess.get_files_at(directory):
         DirAccess.remove_absolute(directory.path_join(leftover))

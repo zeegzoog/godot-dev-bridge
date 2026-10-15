@@ -22,4 +22,8 @@ func _ticker() -> Dictionary:
     }
 
 func _add(args: Dictionary) -> Dictionary:
-    return {"sum": int(args.get("a", 0)) + int(args.get("b", 0))}
+    var a: Variant = args.get("a", 0)
+    var b: Variant = args.get("b", 0)
+    if not (a is int or a is float) or not (b is int or b is float):
+        return {"__bad_args__": "`a` and `b` must be numbers."}
+    return {"sum": int(a) + int(b)}

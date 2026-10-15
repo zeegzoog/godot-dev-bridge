@@ -100,8 +100,13 @@ pub enum Verb {
     Start(StartArgs),
     /// Ask the game to quit, ending it if it stays
     Stop,
-    /// List the sessions on this machine and whether each game is alive
-    Sessions,
+    /// List the sessions on this machine, whether each game is alive and why an ended one closed
+    Sessions {
+        /// First remove the directories of the sessions that have ended, logs and screenshots
+        /// included
+        #[arg(long)]
+        prune: bool,
+    },
     /// Information about the session
     Status,
     /// Check that the game answers
@@ -289,7 +294,7 @@ pub fn command_for(verb: &Verb, ctx: &Context) -> Result<(String, Value)> {
                 request.get("args").cloned().unwrap_or_else(|| json!({})),
             )
         }
-        Verb::Start(_) | Verb::Stop | Verb::Sessions => {
+        Verb::Start(_) | Verb::Stop | Verb::Sessions { .. } => {
             return Err(ClientError::msg("this verb is not a protocol command"));
         }
     })

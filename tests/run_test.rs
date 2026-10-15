@@ -136,6 +136,21 @@ fn sessions_lists_what_is_there() {
     assert_eq!(status, 0);
     assert_eq!(answer["sessions"][0]["session"], "alpha");
     assert_eq!(answer["sessions"][0]["alive"], true);
+    assert!(answer.get("pruned").is_none(), "nothing is pruned unasked");
+}
+
+#[test]
+fn sessions_prune_removes_the_ended_sessions_and_names_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = context(dir.path());
+    session(&ctx, "alive", std::process::id());
+    let ended = session(&ctx, "ended", u32::MAX - 1);
+    let (status, answer) = drive(&ctx, &["sessions", "--prune"]);
+    assert_eq!(status, 0, "{answer}");
+    assert_eq!(answer["pruned"], json!(["ended"]));
+    assert_eq!(answer["sessions"].as_array().unwrap().len(), 1);
+    assert_eq!(answer["sessions"][0]["session"], "alive");
+    assert!(!ended.exists());
 }
 
 #[test]

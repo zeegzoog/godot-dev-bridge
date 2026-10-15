@@ -292,8 +292,7 @@ func _serve(entry: Dictionary) -> void:
     _transport.respond(entry, id, _response(id, outcome))
     _remember(id)
     if _quitting:
-        _transport.write_json("closed.json", {"reason": "quit"})
-        _release_adapter()
+        _close("quit")
         if _quit.is_valid():
             _quit.call()
 
@@ -323,6 +322,8 @@ func _run(name: String, args: Dictionary) -> Variant:
         var outcome: Dictionary = registry.run_command(name, args)
         if outcome.has("error"):
             return _error("project_error", outcome.error)
+        if outcome.has("bad_args"):
+            return _error("bad_args", outcome.bad_args)
         return {"result": OBSERVER.to_json(outcome.value)}
     return _error("unknown_command", "No command named '%s'." % name)
 
@@ -543,10 +544,22 @@ func _idle_expired() -> bool:
 func _end(reason: String) -> void:
     _quitting = true
     _input.release_all()
-    _transport.write_json("closed.json", {"reason": reason})
-    _release_adapter()
+    _close(reason)
     if _quit.is_valid():
         _quit.call()
+
+## The game is ending without the session having ended it (its own code quit, or its window was
+## closed): says so in `closed.json`. A session that ended the game itself has said why already.
+func game_exiting() -> void:
+    if _quitting:
+        return
+    _quitting = true
+    _close("game")
+
+## Says why the session is over (`closed.json`) and lets the adapter go.
+func _close(reason: String) -> void:
+    _transport.write_json("closed.json", {"reason": reason})
+    _release_adapter()
 
 func _window_size() -> Array:
     var size := DisplayServer.window_get_size()

@@ -196,8 +196,25 @@ fn a_step_limit_needs_an_expression_to_limit() {
 }
 
 #[test]
+fn sessions_prunes_only_when_asked() {
+    assert!(matches!(
+        parse(&["sessions"]).verb,
+        Verb::Sessions { prune: false }
+    ));
+    assert!(matches!(
+        parse(&["sessions", "--prune"]).verb,
+        Verb::Sessions { prune: true }
+    ));
+}
+
+#[test]
 fn lifecycle_verbs_are_not_protocol_commands() {
-    for verb in [&["start"][..], &["stop"], &["sessions"]] {
+    for verb in [
+        &["start"][..],
+        &["stop"],
+        &["sessions"],
+        &["sessions", "--prune"],
+    ] {
         assert!(command_for(&parse(verb).verb, &ctx()).is_err());
     }
 }

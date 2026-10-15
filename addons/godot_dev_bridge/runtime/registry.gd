@@ -4,6 +4,11 @@ extends RefCounted
 ## registered by name by the project's adapter. The core knows nothing of the game; this is the one
 ## place the game's own names enter. A project command may not take the name of a core command.
 
+## A project command refuses its arguments by returning a dictionary whose only key is this one,
+## with the message as its value; the driver gets a `bad_args` error. A key of the adapter contract
+## that no command result is likely to have: what an `error` entry means is the project's own.
+const BAD_ARGS_KEY := "__bad_args__"
+
 ## Names the core owns; set by the session.
 var reserved: Array[String] = []
 
@@ -27,7 +32,8 @@ func add_state(name: String, provider: Callable) -> bool:
 ## Refused (logged, not raised) when the name is empty or taken by the core, or the handler is
 ## invalid or does not take exactly one argument. A handler that fails inside its own script cannot
 ## be told from one that returns nothing (the engine logs the script error and the call yields
-## `null`), so a command that can fail should return a dictionary with an `error` entry.
+## `null`), so a command that can fail should say so in what it returns: `{BAD_ARGS_KEY: message}`
+## to refuse its arguments, or a value that describes the failure.
 func add_command(name: String, handler: Callable, help: String = "") -> bool:
     if name.is_empty() or reserved.has(name):
         push_warning("godot_dev_bridge: refused project command '%s' (empty or core name)" % name)
@@ -63,13 +69,19 @@ func command_help() -> Dictionary:
         help[name] = _commands[name].help
     return help
 
-## Runs project command `name` with `args`: `{value}` (any value, `null` included) or `{error}` when
-## the command's handler is no longer valid. A handler that returns nothing is a `null` value.
+## Runs project command `name` with `args`: `{value}` (any value, `null` included), `{bad_args}`
+## (the message) when the command refused its arguments, or `{error}` when the command's handler is
+## no longer valid. A handler that returns nothing is a `null` value.
 func run_command(name: String, args: Dictionary) -> Dictionary:
     var handler: Callable = _commands[name].callable
     if not handler.is_valid():
         return {"error": "The handler of command '%s' is no longer valid." % name}
-    return {"value": handler.call(args)}
+    var value: Variant = handler.call(args)
+    if value is Dictionary:
+        var answer: Dictionary = value
+        if answer.size() == 1 and answer.has(BAD_ARGS_KEY):
+            return {"bad_args": str(answer[BAD_ARGS_KEY])}
+    return {"value": value}
 
 ## What the state providers say: for each name in `names` (all providers when it is empty), its
 ## value, or `{error}` for a provider that is missing or no longer valid; one failing never affects

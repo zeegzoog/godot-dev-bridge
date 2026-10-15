@@ -72,6 +72,12 @@ func _physics_process(_delta: float) -> void:
     if session != null:
         session.physics_tick()
 
+## The tree takes every node out when the game ends, whoever ended it; the session says so when the
+## game ended on its own.
+func _exit_tree() -> void:
+    if session != null:
+        session.game_exiting()
+
 func _quit_the_tree() -> void:
     get_tree().quit()
 

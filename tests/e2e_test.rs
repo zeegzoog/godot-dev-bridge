@@ -150,6 +150,12 @@ fn the_adapter_state_commands_and_errors_reach_the_shell_with_the_right_status()
 
     let sum = bridge.ok(&["do", "add", r#"{"a":2,"b":3}"#]);
     assert_eq!(sum["result"]["sum"], 5);
+    let (status, refused) = bridge.run(&["do", "add", r#"{"a":"two"}"#]);
+    assert_eq!(
+        (status, refused["error"]["code"].as_str()),
+        (1, Some("bad_args")),
+        "a project command can refuse its arguments: {refused}"
+    );
 
     let (status, unknown) = bridge.run(&["do", "no_such_command"]);
     assert_eq!(
@@ -222,4 +228,43 @@ fn stop_ends_the_game_and_a_stale_session_can_be_replaced() {
         "a stale session is replaced by a fresh one"
     );
     assert_eq!(bridge.ticker()["ticks"], 0);
+}
+
+/// A game that ends on its own (here its code quits the tree) says so, the client gives that reason
+/// when it finds the game gone, and the ended session can be pruned.
+#[test]
+#[ignore = "needs a Godot executable: set GODOT_PATH"]
+fn a_game_that_ends_on_its_own_says_so_and_its_session_can_be_pruned() {
+    let bridge = Bridge::new("quitter");
+    let pid = bridge.start()["pid"].as_u64().unwrap() as u32;
+
+    // The quit takes effect when the held game is let go: the tick runs, then the game ends.
+    bridge.ok(&["eval", "tree.quit()"]);
+    let (status, step) = bridge.run(&["step", "1"]);
+    assert_eq!(status, 2, "{step}");
+    let message = step["error"]["message"].as_str().unwrap().to_string();
+    assert!(message.contains("ended on its own"), "{message}");
+    assert!(!is_alive(pid));
+
+    let directory = bridge.root.path().join("quitter");
+    let closed: Value =
+        serde_json::from_str(&std::fs::read_to_string(directory.join("closed.json")).unwrap())
+            .unwrap();
+    assert_eq!(closed["reason"], "game");
+
+    let sessions = bridge.ok(&["sessions"])["sessions"].clone();
+    assert_eq!(sessions[0]["alive"], false);
+    assert_eq!(sessions[0]["closed"], "game");
+    let (status, ping) = bridge.run(&["ping"]);
+    assert_eq!(status, 2);
+    let message = ping["error"]["message"].as_str().unwrap();
+    assert!(
+        message.contains("is not running") && message.contains("ended on its own"),
+        "{message}"
+    );
+
+    let pruned = bridge.ok(&["sessions", "--prune"]);
+    assert_eq!(pruned["pruned"], serde_json::json!(["quitter"]));
+    assert_eq!(pruned["sessions"], serde_json::json!([]));
+    assert!(!directory.exists());
 }
