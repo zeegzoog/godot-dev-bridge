@@ -30,6 +30,8 @@ A reusable development bridge for any Godot 4.5+ project: a shell (or an agent w
 - GDScript has no try/catch; a script error before the reply leaves the client waiting for its timeout. Read request values untyped and validate them; never assign a wrongly typed value to a typed variable; a handler result that is not a dictionary becomes an `internal` error.
 - Every answer must be valid JSON. Values pass through `observer.to_json` (a non-finite float becomes text, nesting is bounded), and a number that arrives in a request is checked to be finite and in range before it is used.
 - A project handler that fails inside its own script cannot be told from one that returns nothing: it answers `null`, or the default of its declared return type (`{}` for `-> Dictionary`), and the engine logs the error. Whether the adapter loaded is reported in `ready.json` and `status` (`adapter`).
+- A project handler refuses its arguments by returning a dictionary whose only key is `__bad_args__` (`registry.BAD_ARGS_KEY`); the answer is `bad_args`. Every other value, a dictionary with an `error` entry included, is a result: that is what such a value meant in protocol 1 from the start.
+- A session that ends says why in `closed.json` (`quit`, `idle`, or `game` when the game ended on its own: the stub's `_exit_tree` tells the session). The first reason written stands.
 - Anything newer than Godot 4.5 is called through `has_method()` + `call()`.
 
 ### 5. Reusable core
@@ -102,10 +104,10 @@ The version in `addons/godot_dev_bridge/plugin.cfg` must always equal `Cargo.tom
 ## Using the Bridge as an Agent
 
 1. `godot-dev-bridge start --headless` (or a window when you need `shot`), then `status`: if `deterministic` is false, read `reason`; if `adapter.loaded` is false, read `adapter.error`.
-2. Between commands the game is held. Act with `press` / `tap` / `do`, advance with `step N` or `step --until EXPR --max M` (never guess a tick count for work on other threads), observe with `state`, `eval`, `get`, `tree` and `shot`.
+2. Between commands the game is held. Act with `press` / `tap` / `do`, advance with `step N` or `step --until EXPR --max M` (never guess a tick count for work on other threads: ticks are not paced by the clock, so give such work real time between short `--until` steps), observe with `state`, `eval`, `get`, `tree` and `shot`.
 3. Long work: raise `--timeout` for a long step. If a step times out (exit status 2, "the game took the request"), it is still running; look at `status` (`physics_frames`) before sending anything again.
 4. Node paths may start with `/` in Git Bash; the client repairs what the shell rewrites.
-5. `sessions` lists every session and whether its game is alive. Always `stop` the session when done. Exit status 1 means the game refused the command (read `error.code`); status 2 means the client could not reach the game or the command line was wrong (read `error.message`, it contains the end of `game.log` when the game died).
+5. `sessions` lists every session, whether its game is alive and why an ended one closed (`closed`); `sessions --prune` removes the ended ones. Always `stop` the session when done. Exit status 1 means the game refused the command (read `error.code`); status 2 means the client could not reach the game or the command line was wrong (read `error.message`, it contains the end of `game.log` when the game died).
 
 ## Completion Protocol (Mandatory Checklist)
 

@@ -78,7 +78,7 @@ Every run is a short process that keeps nothing between runs and prints **one JS
 | --- | --- |
 | `start` | Starts the game detached with the bridge enabled and waits until it is ready. Options: `--project DIR`, `--scene res://...`, `--fps N` (the project's physics ticks per second, 60 if it sets none), `--headless`, `--window WxH` (1152x648), `--fast` (vsync off), `--idle-quit SECONDS`, `--keep-mouse`, `--godot PATH`, and more engine arguments after `--`. Refuses to start over a live session of the same name. Its `pid` is the process the client started and `ready.pid` the engine's; they differ only when `--godot` names a wrapper executable. |
 | `stop` | Asks the game to quit, ends it if it stays. The logs are kept. |
-| `sessions` | Lists the sessions on this machine and whether each game is alive. |
+| `sessions [--prune]` | Lists the sessions on this machine, whether each game is alive and, for a game that said so, why it ended (`closed`, see below). `--prune` first removes the directories of the sessions that have ended, logs and screenshots included, and names them in `pruned`. |
 | `status`, `ping`, `commands` | Information about the session, a liveness check, and the core and project commands with their help. |
 | `step N` | Runs N physics ticks, then holds still. `step --until EXPR [--max M]` runs until the expression holds (checked before every tick, default max 600; `--max` needs `--until`). |
 | `press`, `release`, `tap` | Input by `--action`, `--key` or `--button`; `--ticks` releases after that many ticks (a tap defaults to 2). |
@@ -108,16 +108,23 @@ func _player() -> Dictionary:
     return {} if player == null else {"health": player.health}
 
 func _heal(args: Dictionary) -> Dictionary:
-    return {"healed": int(args.get("amount", 1))}
+    var amount: Variant = args.get("amount", 1)
+    if not (amount is int or amount is float):
+        return {"__bad_args__": "amount must be a number"}
+    return {"healed": int(amount)}
 ```
 
-Then pick the script in **Project Settings → Godot Dev Bridge → Adapter** (the setting `godot_dev_bridge/adapter`). A state provider takes no arguments and returns a value; a command takes exactly one argument, the JSON arguments as a dictionary, and returns a value (a handler with another signature is refused with a warning in the game's log). A command that can fail should return a dictionary with an `error` entry: a script error inside a command cannot be told from a command that returns nothing, so it answers `null` (or the default of the declared return type, such as `{}` for `-> Dictionary`), and the engine only logs the error. Values are converted to JSON like the result of `eval`. A provider should answer an empty value, not an error, while what it reads does not exist (a menu has no player). The names of the core commands are reserved. Read it back with `godot-dev-bridge state player` and `godot-dev-bridge do heal '{"amount": 3}'`.
+Then pick the script in **Project Settings → Godot Dev Bridge → Adapter** (the setting `godot_dev_bridge/adapter`). A state provider takes no arguments and returns a value; a command takes exactly one argument, the JSON arguments as a dictionary, and returns a value (a handler with another signature is refused with a warning in the game's log). A command reports its own failures in what it returns, because a script error inside a command cannot be told from a command that returns nothing: it answers `null` (or the default of the declared return type, such as `{}` for `-> Dictionary`), and the engine only logs the error. To refuse its arguments, a command returns a dictionary whose only key is `__bad_args__`, with the message as its value: the answer is then a `bad_args` error (exit status 1). Every other value is the command's result (`ok` is true), a dictionary with an `error` entry included. Values are converted to JSON like the result of `eval`. A provider should answer an empty value, not an error, while what it reads does not exist (a menu has no player). The names of the core commands are reserved. Read it back with `godot-dev-bridge state player` and `godot-dev-bridge do heal '{"amount": 3}'`.
 
 Extend `RefCounted`. Whether the adapter was found and registered is in `ready.json` and in `godot-dev-bridge status` (`adapter`: `configured`, `path`, `loaded`, and `error` when it did not load), so a missing or broken adapter shows up without reading `game.log`. A script error halfway through `register` cannot be caught: what was registered before it stays, and the error is in the log.
 
 ## Sessions and launch arguments
 
 A session is a name (`--session`, then `DEV_BRIDGE_SESSION`, then `default`; 1 to 64 letters, digits, `.`, `_` or `-`) and a directory below the spool root that holds `session.json`, `ready.json`, the request and response files, `closed.json`, `game.log` and `shots/`. The root is `<temporary directory>/dev_bridge` on Windows and macOS, and on Linux `$XDG_RUNTIME_DIR/dev_bridge` (or `<temporary directory>/dev_bridge-<user id>`), created for your user alone. `DEV_BRIDGE_ROOT` moves it. A game that receives no request for 30 minutes ends itself.
+
+`closed.json` says why the game ended: `quit` (a driver asked it to, as `stop` does), `idle` (no request came for its idle time) or `game` (it ended on its own: its code quit, or its window was closed). A game that crashed or was killed leaves none. A held game does not act on a quit from its own code, or on its window being closed, until it is let go: the game ends with the next `step`, and that step is not answered. The client gives the reason when it finds the game gone, and `sessions` shows it as `closed`.
+
+`sessions --prune` removes a session's directory when its game is no longer running. A directory without a readable `session.json` is removed only when it holds a `game.log` and nothing else that a session does not write, and has not changed for a minute: that is what a start that failed before the game ran leaves. Links in the root and everything else there are never touched, and no link is followed.
 
 `start` passes these after `--` on the Godot command line; you can also use them by hand:
 
@@ -139,7 +146,7 @@ Do not give your adapter a `class_name`. The adapter script is left out of non-d
 - Development only: off unless enabled at launch, never on in a non-debug build.
 - No network: only files in a directory that only the launching user can use. On Unix it has mode 0700; on Windows its access rules are replaced with ones for your account and the system alone. The client refuses a directory that belongs to another user, or a link (a symbolic link or a junction), and never follows a link when it clears a session directory.
 - Input parity: injected input goes through `Input.parse_input_event()`.
-- Controlled time: exact stepping needs the fixed frame rate that `start` sets (`status` reports `deterministic`). Work on other threads and the file system finishes in real time, so wait for it with `step --until`.
+- Controlled time: exact stepping needs the fixed frame rate that `start` sets (`status` reports `deterministic`). That rate is not paced by the clock: a step runs its ticks as fast as the game can draw them, which with no window, or with `--fast`, is far faster than real time (thousands of ticks in a fraction of a second), so `--max` bounds ticks, not seconds. Work on other threads and the file system (a threaded resource load, for one) takes real time instead, so a long `--max` right after `start` may run out before such work is done: repeat `step --until EXPR --max N` until `until_met` is true, letting real time pass between the steps.
 - Safe failure: a malformed, unknown or failing command gets an error answer and changes nothing.
 - No screenshots without a window (`--width` at most 16384). One request at a time, one game per session directory.
 - A request that times out (status `2`) may still be running: the game finishes a `step` it has begun, and the error says so. Look at `status` before sending it again, or raise `--timeout`.
