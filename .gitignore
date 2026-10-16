@@ -47,6 +47,7 @@ Desktop.ini
 /.*/skills/magic-*/
 /.*/*/magic*.md
 
-# SDD machine-local caches and graph renderings (the rest of .design/, wiki included, is shared)
+# SDD generated artifacts, rebuilt on demand by the engine (the rest of .design/ is shared)
 /.design/*graph*.*
 /.design/*cache*/
+/.design/wiki/
