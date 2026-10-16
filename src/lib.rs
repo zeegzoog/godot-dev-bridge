@@ -1,6 +1,7 @@
 pub mod cli;
 pub mod config;
 pub mod error;
+pub mod feedback;
 pub mod launch;
 pub mod msys;
 pub mod process;
@@ -9,7 +10,7 @@ pub mod spool;
 #[cfg(windows)]
 mod winsec;
 
-use clap::Parser;
+use clap::FromArgMatches;
 use cli::{Cli, Verb};
 use config::Context;
 use error::{ClientError, Result};
@@ -48,8 +49,21 @@ fn execute(cli: &Cli, ctx: &Context) -> Result<(i32, Value)> {
         config::validate_session_name(&ctx.session_name(session))?;
     }
     match &cli.verb {
-        Verb::Start(args) => Ok((0, launch::start_session(ctx, session, timeout, args)?)),
-        Verb::Stop => Ok((0, launch::stop_session(ctx, session, timeout)?)),
+        Verb::Start(args) => {
+            let mut answer = launch::start_session(ctx, session, timeout, args)?;
+            if ctx.feedback != config::FeedbackMode::Off {
+                answer["feedback"] = json!(feedback::START_HINT);
+            }
+            Ok((0, answer))
+        }
+        Verb::Stop => {
+            let mut answer = launch::stop_session(ctx, session, timeout)?;
+            if let Some(hint) = feedback::stop_hint(ctx, &ctx.session_name(session)) {
+                answer["feedback"] = hint;
+            }
+            Ok((0, answer))
+        }
+        Verb::Feedback { action } => feedback::execute(ctx, &ctx.session_name(session), action),
         Verb::Sessions { prune } => {
             let mut answer = json!({"ok": true});
             if *prune {
@@ -110,22 +124,31 @@ fn usage_message(error: &clap::Error) -> String {
 /// Runs one command line. Returns the exit status and the JSON object to print; `None` means clap
 /// printed help or the version (a success). A usage error gets clap's explanation on standard error
 /// and the usual client error object, like every other failure.
+///
+/// A failing run is also recorded for the feedback channel, after its outcome is final; recording
+/// never changes the outcome.
 pub fn run(argv: Vec<String>, ctx: &Context) -> (i32, Option<Value>) {
-    let cli = match Cli::try_parse_from(argv) {
+    let parsed = cli::command(ctx.feedback)
+        .try_get_matches_from(&argv)
+        .and_then(|matches| Cli::from_arg_matches(&matches));
+    let cli = match parsed {
         Ok(cli) => cli,
         Err(error) => {
             let _ = error.print();
             return if error.use_stderr() {
+                feedback::observe_usage(ctx, &argv, &error);
                 (2, Some(client_error(&usage_message(&error))))
             } else {
                 (0, None)
             };
         }
     };
-    match execute(&cli, ctx) {
-        Ok((status, output)) => (status, Some(output)),
-        Err(error) => (2, Some(client_error(&error.to_string()))),
-    }
+    let (status, output) = match execute(&cli, ctx) {
+        Ok((status, output)) => (status, output),
+        Err(error) => (2, client_error(&error.to_string())),
+    };
+    feedback::observe_run(ctx, &argv, status, &output);
+    (status, Some(output))
 }
 
 /// The binary's whole job: read the environment, run, print one JSON object, return the status.

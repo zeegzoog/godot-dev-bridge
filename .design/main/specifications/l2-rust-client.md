@@ -1,6 +1,6 @@
 # Rust Client
 
-**Version:** 1.0.0
+**Version:** 1.0.1
 **Status:** Stable
 **Layer:** implementation
 **Implements:** l1-driving-protocol.md
@@ -52,6 +52,7 @@ A shell or an agent needs one dependency-free binary per platform whose every ru
 | `eval EXPR...` | request | `eval {expr}` (words joined by spaces) |
 | `get PATH [PROPS...]`, `tree [PATH] [--depth N] [--props]` | request | node paths repaired for Git Bash |
 | `state [NAMES...]`, `do NAME [JSON]`, `raw JSON` | request | as given |
+| `feedback note\|list\|draft\|submit\|discard` | driver-side | none; specified in [l2-agent-feedback-client.md](l2-agent-feedback-client.md) |
 
 Global options `--session NAME` and `--timeout SECONDS` (default 30, 90 for `start`, positive and at most one year) are accepted before or after the verb. Every verb and argument has help text and a README row.
 
@@ -107,3 +108,4 @@ Git Bash rewrites an argument starting with `/` into a Windows path under its ro
 | Version | Date | Author | Description |
 | --- | --- | --- | --- |
 | 1.0.0 | 2026-10-16 | Agent | Initial specification reverse-engineered from the existing code. |
+| 1.0.1 | 2026-10-16 | Agent (magic.spec) | Listed the feedback verb in 5.1, with a link to its own specification. |

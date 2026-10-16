@@ -13,6 +13,45 @@ pub struct GodotEnv {
     pub godot: Option<String>,
 }
 
+/// What the feedback channel may do (`DEV_BRIDGE_FEEDBACK`): nothing, draft reports only, or also
+/// submit them to the issue tracker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FeedbackMode {
+    Off,
+    Draft,
+    #[default]
+    Full,
+}
+
+impl FeedbackMode {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Draft => "draft",
+            Self::Full => "full",
+        }
+    }
+}
+
+/// The feedback mode a `DEV_BRIDGE_FEEDBACK` value selects, and a warning when the value is not one
+/// of `off`, `draft` or `full` (the default is used then).
+pub fn parse_feedback_mode(value: Option<&str>) -> (FeedbackMode, Option<String>) {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return (FeedbackMode::default(), None);
+    };
+    match value.to_ascii_lowercase().as_str() {
+        "off" => (FeedbackMode::Off, None),
+        "draft" => (FeedbackMode::Draft, None),
+        "full" => (FeedbackMode::Full, None),
+        _ => (
+            FeedbackMode::default(),
+            Some(format!(
+                "warning: ignoring DEV_BRIDGE_FEEDBACK={value}: use off, draft or full (using full)"
+            )),
+        ),
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Context {
     /// The directory every session lives under.
@@ -29,6 +68,10 @@ pub struct Context {
     pub msys_root: OnceCell<Option<String>>,
     pub windows: bool,
     pub path_var: Option<OsString>,
+    /// `DEV_BRIDGE_FEEDBACK`.
+    pub feedback: FeedbackMode,
+    /// `DEV_BRIDGE_GH`: the GitHub command-line client to submit feedback with.
+    pub gh: Option<String>,
 }
 
 /// A variable's value, where an empty value counts as "not set".
@@ -52,6 +95,10 @@ impl Context {
             ),
         }
         let cwd = std::env::current_dir().unwrap_or_default();
+        let (feedback, warning) = parse_feedback_mode(non_empty("DEV_BRIDGE_FEEDBACK").as_deref());
+        if let Some(warning) = warning {
+            eprintln!("{warning}");
+        }
         Self {
             // Absolute, because the game runs with the project as its working directory and
             // would otherwise look for the session directory in the wrong place.
@@ -77,6 +124,8 @@ impl Context {
             msys_root: OnceCell::new(),
             windows: cfg!(windows),
             path_var: std::env::var_os("PATH"),
+            feedback,
+            gh: non_empty("DEV_BRIDGE_GH"),
         }
     }
 
@@ -154,10 +203,16 @@ pub fn validate_session_name(name: &str) -> Result<()> {
 }
 
 fn find_in_path(ctx: &Context) -> Option<PathBuf> {
-    let names: &[&str] = if ctx.windows {
-        &["godot.exe", "godot"]
+    find_program(ctx, "godot")
+}
+
+/// `name` (and on Windows `name.exe` first) in a directory of `PATH`.
+pub fn find_program(ctx: &Context, name: &str) -> Option<PathBuf> {
+    let exe = format!("{name}.exe");
+    let names: Vec<&str> = if ctx.windows {
+        vec![exe.as_str(), name]
     } else {
-        &["godot"]
+        vec![name]
     };
     std::env::split_paths(ctx.path_var.as_ref()?)
         .flat_map(|dir| names.iter().map(move |name| dir.join(name)))

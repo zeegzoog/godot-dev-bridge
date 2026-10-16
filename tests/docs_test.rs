@@ -3,21 +3,31 @@
 use clap::CommandFactory;
 use godot_dev_bridge::cli::Cli;
 
-/// `--help` is what an agent reads first, so no argument may be left without a description.
+/// The arguments of `command` and of every subcommand below it that have no help text.
+fn arguments_without_help(command: &clap::Command, path: &str, missing: &mut Vec<String>) {
+    for argument in command.get_arguments() {
+        let id = argument.get_id().as_str();
+        if id != "help" && id != "version" && argument.get_help().is_none() {
+            missing.push(format!("{path} {id}"));
+        }
+    }
+    for sub in command.get_subcommands() {
+        if sub.get_name() == "help" {
+            continue;
+        }
+        if sub.get_about().is_none() {
+            missing.push(format!("{path} {} (the command itself)", sub.get_name()));
+        }
+        arguments_without_help(sub, &format!("{path} {}", sub.get_name()), missing);
+    }
+}
+
+/// `--help` is what an agent reads first, so no argument of any verb, nested ones included, may be
+/// left without a description.
 #[test]
 fn every_argument_of_every_verb_has_help_text() {
     let mut missing = Vec::new();
-    for command in Cli::command().get_subcommands() {
-        if command.get_name() == "help" {
-            continue;
-        }
-        for argument in command.get_arguments() {
-            let id = argument.get_id().as_str();
-            if id != "help" && id != "version" && argument.get_help().is_none() {
-                missing.push(format!("{} {id}", command.get_name()));
-            }
-        }
-    }
+    arguments_without_help(&Cli::command(), "godot-dev-bridge", &mut missing);
     assert!(missing.is_empty(), "arguments without help: {missing:?}");
 }
 

@@ -282,3 +282,34 @@ impl Drop for Bridge {
         let _ = self.command(&["stop"]).output();
     }
 }
+
+/// The stand-in `gh` of `examples/fake_gh.rs`, built for this run: a run that names one test target
+/// does not build the examples, and a stale stand-in would test old behaviour.
+pub fn fake_gh() -> PathBuf {
+    static BUILT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    BUILT
+        .get_or_init(|| {
+            let deps = std::env::current_exe().expect("the test executable");
+            let profile = deps
+                .parent()
+                .and_then(Path::parent)
+                .expect("the profile directory")
+                .to_path_buf();
+            let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
+            let mut build = Command::new(cargo);
+            build
+                .args(["build", "--quiet", "--example", "fake_gh"])
+                .current_dir(project_root());
+            if profile.file_name().is_some_and(|name| name == "release") {
+                build.arg("--release");
+            }
+            assert!(
+                build.status().expect("cargo runs").success(),
+                "building the stand-in gh failed"
+            );
+            profile
+                .join("examples")
+                .join(format!("fake_gh{}", std::env::consts::EXE_SUFFIX))
+        })
+        .clone()
+}

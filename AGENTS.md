@@ -117,7 +117,8 @@ The version in `addons/godot_dev_bridge/plugin.cfg` must always equal `Cargo.tom
 2. Between commands the game is held. Act with `press` / `tap` / `do`, advance with `step N` or `step --until EXPR --max M` (never guess a tick count for work on other threads: ticks are not paced by the clock, so give such work real time between short `--until` steps), observe with `state`, `eval`, `get`, `tree` and `shot`.
 3. Long work: raise `--timeout` for a long step. If a step times out (exit status 2, "the game took the request"), it is still running; look at `status` (`physics_frames`) before sending anything again.
 4. Node paths may start with `/` in Git Bash; the client repairs what the shell rewrites.
-5. `sessions` lists every session, whether its game is alive and why an ended one closed (`closed`); `sessions --prune` removes the ended ones. Always `stop` the session when done. Exit status 1 means the game refused the command (read `error.code`); status 2 means the client could not reach the game or the command line was wrong (read `error.message`, it contains the end of `game.log` when the game died).
+5. `sessions` lists every session, whether its game is alive and why an ended one closed (`closed`); `sessions --prune` removes the ended ones. Always `stop` the session when done.
+6. When the bridge itself gets in your way (a missing verb, a misleading message or help text, a defect), record it with `feedback note` as you go. At the end, `feedback draft`, show the user the whole report and offer to copy it, open its link, submit it or discard it. Never run `feedback submit` without the user's explicit yes. Exit status 1 means the game refused the command (read `error.code`); status 2 means the client could not reach the game or the command line was wrong (read `error.message`, it contains the end of `game.log` when the game died).
 
 ## Completion Protocol (Mandatory Checklist)
 

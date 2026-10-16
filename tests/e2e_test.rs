@@ -268,3 +268,35 @@ fn a_game_that_ends_on_its_own_says_so_and_its_session_can_be_pruned() {
     assert_eq!(pruned["sessions"], serde_json::json!([]));
     assert!(!directory.exists());
 }
+
+/// `start` tells the agent that the feedback channel exists, and `stop` reports the notes that are
+/// waiting for a draft, and says nothing once they are drafted.
+#[test]
+#[ignore = "needs a Godot executable: set GODOT_PATH"]
+fn start_mentions_the_feedback_channel_and_stop_reports_pending_notes() {
+    let bridge = Bridge::new("feedback");
+    let started = bridge.start();
+    assert!(
+        started["feedback"]
+            .as_str()
+            .is_some_and(|hint| hint.contains("feedback note")),
+        "{started}"
+    );
+    bridge.ok(&[
+        "feedback",
+        "note",
+        "--kind",
+        "docs",
+        "--summary",
+        "a summary",
+        "--details",
+        "some details",
+    ]);
+    let stopped = bridge.ok(&["stop"]);
+    assert_eq!(stopped["feedback"]["pending"], 1, "{stopped}");
+
+    bridge.start();
+    bridge.ok(&["feedback", "draft"]);
+    let stopped = bridge.ok(&["stop"]);
+    assert_eq!(stopped.get("feedback"), None, "{stopped}");
+}

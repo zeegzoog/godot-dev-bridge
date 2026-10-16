@@ -231,3 +231,30 @@ fn the_default_spool_root_is_private_to_the_user_on_every_platform() {
     // Windows and macOS give every user a temporary directory of their own.
     assert_eq!(default_root(temp, None, None), Path::new("/tmp/dev_bridge"));
 }
+
+#[test]
+fn the_feedback_mode_is_off_draft_or_full_in_any_case_and_full_by_default() {
+    use godot_dev_bridge::config::{FeedbackMode, parse_feedback_mode};
+    assert_eq!(parse_feedback_mode(None), (FeedbackMode::Full, None));
+    assert_eq!(parse_feedback_mode(Some("  ")), (FeedbackMode::Full, None));
+    assert_eq!(parse_feedback_mode(Some("OFF")), (FeedbackMode::Off, None));
+    assert_eq!(
+        parse_feedback_mode(Some("Draft")),
+        (FeedbackMode::Draft, None)
+    );
+    assert_eq!(
+        parse_feedback_mode(Some("full")),
+        (FeedbackMode::Full, None)
+    );
+    let (mode, warning) = parse_feedback_mode(Some("loud"));
+    assert_eq!(mode, FeedbackMode::Full);
+    let warning = warning.expect("a warning for an unknown value");
+    assert!(warning.contains("DEV_BRIDGE_FEEDBACK=loud") && warning.contains("off, draft or full"));
+}
+
+#[test]
+fn the_default_context_records_feedback_and_names_no_gh() {
+    let ctx = Context::default();
+    assert_eq!(ctx.feedback, godot_dev_bridge::config::FeedbackMode::Full);
+    assert_eq!(ctx.gh, None);
+}

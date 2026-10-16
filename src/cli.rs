@@ -1,9 +1,10 @@
 //! The command line: clap definitions and the one-to-one mapping from verbs to protocol commands.
 
 use crate::config::Context;
+use crate::config::FeedbackMode;
 use crate::error::{ClientError, Result};
 use crate::msys::unmangle_node_path;
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 
@@ -11,7 +12,8 @@ use std::path::PathBuf;
 #[command(
     name = "godot-dev-bridge",
     version,
-    about = "Drive a running Godot 4 game from a shell: hold it still, step it, inject input, read state, take screenshots"
+    about = "Drive a running Godot 4 game from a shell: hold it still, step it, inject input, read state, take screenshots",
+    after_help = "Something in godot-dev-bridge itself missing, broken or misleading? See `godot-dev-bridge feedback --help`."
 )]
 pub struct Cli {
     /// Session name (default: $DEV_BRIDGE_SESSION, then "default")
@@ -92,6 +94,110 @@ impl InputArgs {
         }
         args
     }
+}
+
+/// What a feedback note is about.
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NoteKind {
+    /// Something does not work as documented
+    Bug,
+    /// A capability the work needed has no verb or option
+    MissingFeature,
+    /// Something works but could serve an agent better
+    Improvement,
+    /// The help or the README is wrong, missing or misleading
+    Docs,
+}
+
+impl NoteKind {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Bug => "bug",
+            Self::MissingFeature => "missing-feature",
+            Self::Improvement => "improvement",
+            Self::Docs => "docs",
+        }
+    }
+}
+
+/// How much a problem held up the work.
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Impact {
+    /// The task could not be done
+    Blocked,
+    /// It was done another way
+    Workaround,
+    /// A small cost
+    Minor,
+}
+
+impl Impact {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Blocked => "blocked",
+            Self::Workaround => "workaround",
+            Self::Minor => "minor",
+        }
+    }
+}
+
+#[derive(Args, Debug)]
+pub struct NoteArgs {
+    /// What the note is about
+    #[arg(long, value_enum)]
+    pub kind: NoteKind,
+    /// The problem in one line, in English (at most 120 characters)
+    #[arg(long)]
+    pub summary: String,
+    /// What you tried, what came back and what you expected, in English (at most 2000 characters)
+    #[arg(long, allow_hyphen_values = true)]
+    pub details: String,
+    /// The verb involved, when there is one, for example step
+    #[arg(long)]
+    pub verb: Option<String>,
+    /// How much it held up the work
+    #[arg(long, value_enum)]
+    pub impact: Option<Impact>,
+    /// What would have helped (at most 500 characters)
+    #[arg(long, allow_hyphen_values = true)]
+    pub suggestion: Option<String>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum FeedbackAction {
+    /// Record one problem with godot-dev-bridge itself, as soon as you meet it
+    Note(NoteArgs),
+    /// Show the notes and drafts recorded under this session name
+    List,
+    /// Build one report from notes, for the user to review in full
+    Draft {
+        /// The notes to include, comma separated (default: every note not yet drafted)
+        #[arg(long, value_delimiter = ',')]
+        notes: Vec<String>,
+        /// The issue title (default: the kind and the first note's summary)
+        #[arg(long)]
+        title: Option<String>,
+    },
+    /// Create the GitHub issue of a draft, only after the user said yes to it
+    Submit {
+        /// The draft to submit, as `feedback draft` named it
+        draft: String,
+        /// The user has seen the whole report and said yes to submitting it
+        #[arg(long)]
+        confirmed: bool,
+        /// Create the issue even though one with the same fingerprint exists
+        #[arg(long)]
+        allow_duplicate: bool,
+    },
+    /// Remove notes and drafts
+    Discard {
+        /// The notes and drafts to remove
+        #[arg(required_unless_present = "all", conflicts_with = "all")]
+        ids: Vec<String>,
+        /// Remove everything recorded under this session name
+        #[arg(long)]
+        all: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -193,6 +299,39 @@ pub enum Verb {
         /// The whole request, as JSON: {"cmd": "...", "args": {...}}
         json: String,
     },
+    /// Report what is missing, broken or misleading in godot-dev-bridge itself to its maintainers
+    #[command(long_about = crate::feedback::HELP_FULL, arg_required_else_help = true)]
+    Feedback {
+        #[command(subcommand)]
+        action: FeedbackAction,
+    },
+}
+
+/// The command line as the feedback mode shows it: in draft mode `submit` is hidden and the help
+/// does not mention submission; when the channel is off, its help says so.
+pub fn command(mode: FeedbackMode) -> clap::Command {
+    let help = match mode {
+        FeedbackMode::Full => crate::feedback::HELP_FULL,
+        FeedbackMode::Draft => crate::feedback::HELP_DRAFT,
+        FeedbackMode::Off => crate::feedback::HELP_OFF,
+    };
+    Cli::command().mut_subcommand("feedback", |feedback| {
+        let feedback = feedback.long_about(help);
+        if mode == FeedbackMode::Full {
+            feedback
+        } else {
+            feedback.mut_subcommand("submit", |submit| submit.hide(true))
+        }
+    })
+}
+
+/// The names of the verbs, `help` excluded.
+pub fn verb_names() -> Vec<String> {
+    Cli::command()
+        .get_subcommands()
+        .map(|command| command.get_name().to_string())
+        .filter(|name| name != "help")
+        .collect()
 }
 
 fn parse_json(text: &str, what: &str) -> Result<Value> {
@@ -294,7 +433,7 @@ pub fn command_for(verb: &Verb, ctx: &Context) -> Result<(String, Value)> {
                 request.get("args").cloned().unwrap_or_else(|| json!({})),
             )
         }
-        Verb::Start(_) | Verb::Stop | Verb::Sessions { .. } => {
+        Verb::Start(_) | Verb::Stop | Verb::Sessions { .. } | Verb::Feedback { .. } => {
             return Err(ClientError::msg("this verb is not a protocol command"));
         }
     })

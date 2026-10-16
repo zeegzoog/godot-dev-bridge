@@ -196,7 +196,7 @@ fn detach(command: &mut Command) {
 /// for the game to exit instead of for this client. The game's own standard handles are passed
 /// explicitly, so only this client's are made private.
 #[cfg(windows)]
-fn keep_own_handles_private() {
+pub(crate) fn keep_own_handles_private() {
     use windows_sys::Win32::Foundation::{HANDLE_FLAG_INHERIT, SetHandleInformation};
     use windows_sys::Win32::System::Console::{
         GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,

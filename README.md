@@ -68,7 +68,7 @@ godot-dev-bridge shot                  # the window's last frame, as a PNG
 godot-dev-bridge stop
 ```
 
-Every run is a short process that keeps nothing between runs and prints **one JSON object**. Exit status: `0` success, `1` the game answered with an error (`ok` is false, `error` has a `code` and a `message`), `2` the client could not start, reach or understand the session. A mistake in the command line is explained on standard error and answered the same way (`code` is `client`, status `2`); `--help` and `--version` print their text and no object.
+Every run is a short process that keeps nothing in memory between runs (the [feedback notebook](#reporting-problems-with-the-bridge) is kept as files) and prints **one JSON object**. Exit status: `0` success, `1` the game answered with an error (`ok` is false, `error` has a `code` and a `message`), `2` the client could not start, reach or understand the session. A mistake in the command line is explained on standard error and answered the same way (`code` is `client`, status `2`); `--help` and `--version` print their text and no object.
 
 ## Commands
 
@@ -89,8 +89,11 @@ Every run is a short process that keeps nothing between runs and prints **one JS
 | `get PATH [PROPS...]`, `tree [PATH] [--depth N] [--props]` | Reads node properties and lists nodes. |
 | `state [NAMES...]`, `do NAME [JSON]` | Reads the state and runs the commands your adapter registered. |
 | `raw JSON` | Sends a request as written. |
+| `feedback note\|list\|draft\|submit\|discard` | Records problems with the bridge itself and turns them into reports for its maintainers (see [below](#reporting-problems-with-the-bridge)). Sends no request to the game. |
 
 Error codes: `bad_request`, `unknown_command`, `bad_args`, `eval_failed`, `not_found`, `no_renderer`, `project_error`, `internal`.
+
+Unless the feedback channel is off, the answer of `start` has a `feedback` field, one line that points to `feedback note`, and the answer of `stop` has a `feedback` field (`pending`, the number of notes not yet drafted, and `next`, what to do with them) when such notes exist.
 
 ## Writing an adapter
 
@@ -138,6 +141,23 @@ A session is a name (`--session`, then `DEV_BRIDGE_SESSION`, then `default`; 1 t
 | `--bridge-idle-quit=<seconds>` | Ends the game after this long with no request (default 1800, 0 disables). |
 | `--bridge-keep-mouse` | Leaves the pointer as the game sets it. By default a session frees it. |
 
+## Reporting problems with the bridge
+
+The bridge is made for agents, so an agent is usually the first to find what is missing, broken or misleading in it. The `feedback` verbs let it tell the maintainers, with you deciding what is sent:
+
+1. While it works, the agent records each problem with the bridge itself as a note: `godot-dev-bridge feedback note --kind bug --verb step --summary "..." --details "..."` (kinds: `bug`, `missing-feature`, `improvement`, `docs`; optional `--impact blocked|workaround|minor` and `--suggestion`). Its own mistakes and problems in your game or adapter are not for notes.
+2. When the work is done (`stop` reports notes waiting), it runs `godot-dev-bridge feedback draft`, which builds one report from the notes, and shows you the whole report. Each draft is meant to become one issue.
+3. You copy the text into a new issue yourself, open the prefilled link the draft carries, discard the draft (`feedback discard ID`), or tell the agent to submit it. Only then does it run `godot-dev-bridge feedback submit ID --confirmed`, which uses your own signed-in [GitHub CLI](https://cli.github.com) (`gh`) to create the issue in this repository. Submission first looks for an issue with the same fingerprint and reports that issue instead of filing it again (`--allow-duplicate` files it anyway). Its answer says `created` or `duplicate` (status `0`), or `not_created` or `unknown` (status `2`, with the steps to take).
+
+`feedback list` shows the notes and drafts. They are files in the private spool root (`@feedback/`), kept per session name, removed after seven days without change, and never touched by `start` or `sessions --prune`.
+
+What a report contains: the agent's notes; the client, addon and engine versions; the platform; whether the shell rewrites paths; whether the session was headless, whether stepping was exact, and whether an adapter was configured and loaded; and the client's own record of the failures of the verbs the notes name and of attempts at verbs and options that do not exist. It never contains the game's log, screenshots, the session name, the adapter's path, or the contents of your project. Before anything enters a report, absolute paths become `{project}`, `{root}`, `{session}` or `{path}`, words that look like credentials become `{redacted}`, and mentions, issue references and images are neutralized. Read the report anyway: it will be public.
+
+| Variable | Meaning |
+| --- | --- |
+| `DEV_BRIDGE_FEEDBACK` | `full` (default), `draft` (reports only; `submit` is refused) or `off` (nothing is recorded, the `feedback` verbs are refused and no answer mentions them) |
+| `DEV_BRIDGE_GH` | The `gh` executable to submit with (default: `gh` on `PATH`) |
+
 ## Release builds
 
 Nothing to configure. The plugin's export plugin leaves `runtime/`, the plugin scripts and your adapter out of every non-debug export. Only the inert autoload stub ships, and without `runtime/` there is nothing for a launch flag to switch on. The stub also checks `OS.is_debug_build()` itself.
@@ -147,7 +167,7 @@ Do not give your adapter a `class_name`. The adapter script is left out of non-d
 ## Guarantees and limits
 
 - Development only: off unless enabled at launch, never on in a non-debug build.
-- No network: only files in a directory that only the launching user can use. On Unix it has mode 0700; on Windows its access rules are replaced with ones for your account and the system alone. The client refuses a directory that belongs to another user, or a link (a symbolic link or a junction), and never follows a link when it clears a session directory.
+- No network: the driving channel is only files in a directory that only the launching user can use. The one network contact is `feedback submit`, which runs your own `gh` after your approval. On Unix it has mode 0700; on Windows its access rules are replaced with ones for your account and the system alone. The client refuses a directory that belongs to another user, or a link (a symbolic link or a junction), and never follows a link when it clears a session directory.
 - Input parity: injected input goes through `Input.parse_input_event()`.
 - Controlled time: exact stepping needs the fixed frame rate that `start` sets (`status` reports `deterministic`). That rate is not paced by the clock: a step runs its ticks as fast as the game can draw them, which with no window, or with `--fast`, is far faster than real time (thousands of ticks in a fraction of a second), so `--max` bounds ticks, not seconds. Work on other threads and the file system (a threaded resource load, for one) takes real time instead, so a long `--max` right after `start` may run out before such work is done: repeat `step --until EXPR --max N` until `until_met` is true, letting real time pass between the steps.
 - Safe failure: a malformed, unknown or failing command gets an error answer and changes nothing.

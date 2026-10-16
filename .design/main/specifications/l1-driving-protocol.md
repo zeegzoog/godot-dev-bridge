@@ -1,6 +1,6 @@
 # Driving Protocol
 
-**Version:** 1.0.0
+**Version:** 1.0.1
 **Status:** Stable
 **Layer:** concept
 
@@ -83,7 +83,7 @@ graph TD
 
 ### 4.4 Lifecycle Verbs
 
-Starting, stopping and listing sessions are driver-side operations, not requests: they create, end or inspect session directories. Every other verb maps one-to-one onto a request.
+Starting, stopping and listing sessions are driver-side operations, not requests: they create, end or inspect session directories. The feedback verbs are driver-side too: they keep a notebook beside the sessions and send no request (see [l1-agent-feedback.md](l1-agent-feedback.md)). Every other verb maps one-to-one onto a request.
 
 ## 5. Drawbacks & Alternatives
 
@@ -104,3 +104,4 @@ Starting, stopping and listing sessions are driver-side operations, not requests
 | Version | Date | Author | Description |
 | --- | --- | --- | --- |
 | 1.0.0 | 2026-10-16 | Agent | Initial specification reverse-engineered from the existing code (protocol 1). |
+| 1.0.1 | 2026-10-16 | Agent (magic.spec) | Clarified in 4.4 that the feedback verbs are driver-side, alongside the lifecycle verbs. |

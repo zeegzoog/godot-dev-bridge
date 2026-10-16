@@ -8,6 +8,13 @@ release needs one (the release workflow fails without it).
 
 ### Added
 
+- `feedback`: an agent records what it finds missing, broken or misleading in the bridge itself
+  (`feedback note`), turns the notes into one scrubbed report per problem for the user to review
+  (`feedback draft`, with a prefilled new-issue link), and, only after the user's yes, files it as a
+  GitHub issue through the user's own `gh` (`feedback submit --confirmed`), which reports an existing
+  issue with the same fingerprint instead of filing it again. `start` and `stop` answers point to it.
+  `DEV_BRIDGE_FEEDBACK` turns it down to drafting only, or off; `DEV_BRIDGE_GH` names the `gh` to use.
+
 - `registry.refuse(message)`: what a project command returns to refuse its arguments. It returns
   the dictionary whose only key is `__bad_args__`, so commands that write that dictionary by hand
   keep working; calling `refuse` means a misspelled key cannot turn a refusal into an ordinary result.
