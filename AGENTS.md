@@ -59,7 +59,17 @@ A reusable development bridge for any Godot 4.5+ project: a shell (or an agent w
 
 - Code, identifiers, comments, documentation, commit messages, issue titles, error messages and logs are English only.
 - Documentation, comments, tests and release notes are neutral and self-contained: they do not name other projects or tools.
-- Markdown: no horizontal rules (`---`) except in a footer where unavoidable. Local planning notes are git-ignored and are not part of the repository; nothing in the repository may depend on them.
+- Markdown: no horizontal rules (`---`) except in a footer where unavoidable. Personal working notes (`scratch/` and the other paths `.gitignore` lists) are git-ignored and are not part of the repository; nothing in the repository may depend on them.
+
+## Specification-Driven Development
+
+The project is developed specification-first. The SDD layer is scaffolding: it is erected around the product and never carries its weight.
+
+- **Engine** (`.magic/` and the workflow wrappers under `.agents/`): installed on each machine from the engine's release archive and never committed (`.gitignore` excludes it). Its rules and workflows take precedence over this file wherever the two disagree on how work is specified, planned, tracked or recorded; this file stays authoritative for the product itself (architecture, protocol 1, invariants, quality gates).
+- **Workspace** (`.design/`): the specifications, registry, plans, tasks, state and generated wiki. It is committed and pushed so that the whole team works from one source; only machine-local caches and graph renderings are git-ignored. Change it through the engine's workflows, and commit it together with the code it describes.
+- **Scaffold-removal test**: with `.design/`, `.magic/` and `.agents/` deleted, the product must still build, test, run and package. No build step, CI job, test, export or release artifact may read them, and product files (code, comments, README, CHANGELOG, release notes) carry no SDD references: no `.design/` paths, task or phase identifiers, or specification file names.
+- The engine installs a git pre-commit hook that checks its own integrity; it needs Node.js and lets the commit through when `.magic/` is absent.
+- Releases stay outside the engine: they follow `.agents/skills/release/SKILL.md`, and tagging and pushing still need an explicit go-ahead, because no engine workflow tags or pushes.
 
 ## Quality Assurance & Verification Protocols
 
@@ -147,6 +157,7 @@ Before concluding any task, the agent MUST work through this list and report any
 
 ### Hygiene and reporting
 
-- [ ] `git status` shows only the intended files: no `.env`, build output, scratch or generated files.
+- [ ] `git status` shows only the intended files: no `.env`, build output, scratch or generated files (the `.design/` workspace and its wiki are intended and committed; the engine is not).
+- [ ] Product files carry no SDD references, and nothing outside `.design/` depends on the SDD layer (scaffold-removal test).
 - [ ] No game was left running: every session started during the task was stopped (`godot-dev-bridge sessions`).
 - [ ] Failed or skipped checks are reported with their output, and what was verified is stated plainly.

@@ -41,3 +41,12 @@ scratch/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# SDD engine (installed from a release archive, not committed)
+/.magic/
+/.*/skills/magic-*/
+/.*/*/magic*.md
+
+# SDD machine-local caches and graph renderings (the rest of .design/, wiki included, is shared)
+/.design/*graph*.*
+/.design/*cache*/

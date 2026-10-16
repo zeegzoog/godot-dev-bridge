@@ -1,0 +1,16 @@
+{
+  "default": "main",
+  "workspaces": {
+    "main": {
+      "description": "Rust client and Godot addon of godot-dev-bridge: the spool protocol, the parked main loop, input injection, observation and the development-only locks. Open it for any change to the product."
+    }
+  },
+  "finalization": {
+    "enabled": true,
+    "autoBump": true,
+    "autoChangelog": true
+  },
+  "archival": {
+    "enabled": true
+  }
+}
