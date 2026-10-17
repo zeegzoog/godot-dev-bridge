@@ -42,8 +42,9 @@ scratch/
 Thumbs.db
 Desktop.ini
 
-# SDD engine (installed from a release archive, not committed)
+# SDD engine
 /.magic/
+/.*/skills/
 /.*/skills/magic-*/
 /.*/*/magic*.md
 
@@ -51,3 +52,6 @@ Desktop.ini
 /.design/*graph*.*
 /.design/*cache*/
 /.design/wiki/
+
+# Skills
+!/.*/skills/release
