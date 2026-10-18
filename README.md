@@ -18,13 +18,13 @@ Requirements: **Godot 4.5+**. No Rust toolchain needed.
 Open your Godot project in the assistant and paste:
 
 ```text
-Install godot-dev-bridge (https://github.com/zigenzoog/godot-dev-bridge) for this Godot project. Use the GitHub release, not a local clone of that repository.
+Install godot-dev-bridge (https://github.com/zenzoog/godot-dev-bridge) for this Godot project. Use the GitHub release, not a local clone of that repository.
 
 1. Detect the OS and CPU architecture (Windows, Linux, or macOS; x86_64 or arm64).
 2. Ask me for the full path to my Godot executable. Never guess it: Windows builds are portable, version-named files. Run `<path> --version` to confirm it works.
-3. Download the client for this platform and godot-dev-bridge-addon.zip from https://github.com/zigenzoog/godot-dev-bridge/releases/latest, e.g.:
-   gh release download --repo zigenzoog/godot-dev-bridge --pattern "godot-dev-bridge-<target-triple>.*"
-   gh release download --repo zigenzoog/godot-dev-bridge --pattern "godot-dev-bridge-addon.zip"
+3. Download the client for this platform and godot-dev-bridge-addon.zip from https://github.com/zenzoog/godot-dev-bridge/releases/latest, e.g.:
+   gh release download --repo zenzoog/godot-dev-bridge --pattern "godot-dev-bridge-<target-triple>.*"
+   gh release download --repo zenzoog/godot-dev-bridge --pattern "godot-dev-bridge-addon.zip"
    Extract the client to a permanent folder that is on PATH or that I can call by full path: %LOCALAPPDATA%\godot-dev-bridge\ (Windows), ~/.local/bin/ (Linux), ~/Library/Application Support/godot-dev-bridge/ (macOS).
 4. Copy addons/godot_dev_bridge from the addon archive into <project>/addons/godot_dev_bridge and add it to project.godot:
    [editor_plugins]
@@ -37,7 +37,7 @@ Install godot-dev-bridge (https://github.com/zigenzoog/godot-dev-bridge) for thi
 
 ### Option B: install manually
 
-1. Download the client for your platform and the addon from the [latest release](https://github.com/zigenzoog/godot-dev-bridge/releases/latest):
+1. Download the client for your platform and the addon from the [latest release](https://github.com/zenzoog/godot-dev-bridge/releases/latest):
 
    | Platform | Asset |
    | --- | --- |

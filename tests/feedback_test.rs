@@ -806,7 +806,7 @@ impl Shell {
     }
 }
 
-const ISSUE: &str = "https://github.com/zigenzoog/godot-dev-bridge/issues/7";
+const ISSUE: &str = "https://github.com/zenzoog/godot-dev-bridge/issues/7";
 
 fn strings(value: &Value) -> Vec<String> {
     value
@@ -821,7 +821,7 @@ fn strings(value: &Value) -> Vec<String> {
 fn a_submission_looks_for_a_duplicate_then_creates_the_issue_once() {
     let shell = Shell::new(json!({
         "list": {"stdout": "[]"},
-        "create": {"stdout": format!("Creating issue in zigenzoog/godot-dev-bridge\n\n{ISSUE}\n")}
+        "create": {"stdout": format!("Creating issue in zenzoog/godot-dev-bridge\n\n{ISSUE}\n")}
     }));
     let (id, drafted) = shell.draft();
     let (status, answer, _) = shell.run(&["feedback", "submit", &id, "--confirmed"]);
@@ -862,8 +862,8 @@ fn an_issue_with_the_fingerprint_is_reported_instead_of_a_new_one_unless_asked()
         shell.dir.path().join("gh/behaviour.json"),
         json!({
             "list": {"stdout": json!([
-                {"number": 3, "title": "x", "url": "https://github.com/zigenzoog/godot-dev-bridge/issues/3", "body": "unrelated"},
-                {"number": 5, "title": "y", "url": "https://github.com/zigenzoog/godot-dev-bridge/issues/5", "body": format!("- Fingerprint: {fingerprint}")}
+                {"number": 3, "title": "x", "url": "https://github.com/zenzoog/godot-dev-bridge/issues/3", "body": "unrelated"},
+                {"number": 5, "title": "y", "url": "https://github.com/zenzoog/godot-dev-bridge/issues/5", "body": format!("- Fingerprint: {fingerprint}")}
             ]).to_string()},
             "create": {"stdout": ISSUE}
         })
@@ -875,7 +875,7 @@ fn an_issue_with_the_fingerprint_is_reported_instead_of_a_new_one_unless_asked()
     assert_eq!(answer["outcome"], "duplicate");
     assert_eq!(
         answer["url"],
-        "https://github.com/zigenzoog/godot-dev-bridge/issues/5"
+        "https://github.com/zenzoog/godot-dev-bridge/issues/5"
     );
     assert_eq!(shell.calls().len(), 1, "nothing was created");
 

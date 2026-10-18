@@ -259,7 +259,7 @@ mod tests {
 
     #[test]
     fn the_repository_comes_from_the_manifest() {
-        assert_eq!(repository().as_deref(), Some("zigenzoog/godot-dev-bridge"));
+        assert_eq!(repository().as_deref(), Some("zenzoog/godot-dev-bridge"));
     }
 
     #[test]
