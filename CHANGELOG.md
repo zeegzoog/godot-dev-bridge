@@ -84,5 +84,5 @@ First release: a standalone development bridge that any Godot 4.5+ project can u
   deeply nested or self-referencing values are cut off, a key has one name however it is spelled,
   and an adapter that extends `Node` is freed when the session ends.
 
-[0.2.0]: https://github.com/zenzoog/godot-dev-bridge/releases/tag/v0.2.0
-[0.1.0]: https://github.com/zenzoog/godot-dev-bridge/releases/tag/v0.1.0
+[0.2.0]: https://github.com/zeegzoog/godot-dev-bridge/releases/tag/v0.2.0
+[0.1.0]: https://github.com/zeegzoog/godot-dev-bridge/releases/tag/v0.1.0

@@ -7,7 +7,7 @@ authors = ["Oleg Alexandrov <alexandrovoleg.ru@gmail.com>"]
 description = "Drive a running Godot game from a shell: hold it still, step it by exact ticks, inject input, read state, take screenshots"
 license = "MIT"
 readme = "README.md"
-repository = "https://github.com/zenzoog/godot-dev-bridge"
+repository = "https://github.com/zeegzoog/godot-dev-bridge"
 
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
