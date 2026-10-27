@@ -2,6 +2,7 @@
 name = "godot-dev-bridge"
 version = "0.3.0"
 edition = "2024"
+rust-version = "1.85"
 authors = ["Oleg Alexandrov <alexandrovoleg.ru@gmail.com>"]
 description = "Drive a running Godot game from a shell: hold it still, step it by exact ticks, inject input, read state, take screenshots"
 license = "MIT"
